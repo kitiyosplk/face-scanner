@@ -189,6 +189,9 @@
 
     async function init() {
       try {
+        setStatus('กำลังเปิดกล้อง...');
+        await startCamera();
+
         setStatus('กำลังโหลดโมเดล AI...');
         await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
         await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
@@ -197,11 +200,12 @@
         setStatus('กำลังโหลดข้อมูลพนักงานจาก Drive...');
         await loadEmployees();
 
-        setStatus('กำลังเปิดกล้อง...');
-        await startCamera();
-
-        setStatus('✅ พร้อมสแกน — กรุณามองกล้องให้เห็นหน้าชัดเจน');
-        detectLoop();
+        if (matcher) {
+          setStatus('✅ พร้อมสแกน — กรุณามองกล้องให้เห็นหน้าชัดเจน');
+          detectLoop();
+        } else {
+          setStatus('⚠️ กล้องพร้อมทำงาน แต่ยังไม่มีข้อมูลพนักงานเพื่อสแกนใบหน้า');
+        }
       } catch (err) {
         console.error(err);
         setStatus('❌ เกิดข้อผิดพลาด: ' + err.message);
@@ -209,25 +213,42 @@
     }
 
     async function loadEmployees() {
-      const response = await fetch(WEB_APP_URL + '?action=getEmployees');
-      employeesData = await response.json();
-
-      const labeledDescriptors = [];
-      for (const emp of employeesData) {
-        try {
-          const img = await faceapi.fetchImage(emp.dataUrl);
-          const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
-            .withFaceLandmarks().withFaceDescriptor();
-          if (detection) {
-            labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
-          }
-        } catch (e) {
-          console.warn('โหลดรูปพนักงานล้มเหลว:', emp.name);
+      try {
+        const response = await fetch(WEB_APP_URL + '?action=getEmployees');
+        const text = await response.text();
+        
+        // ตรวจสอบว่าผลลัพธ์เป็น HTML (อาจเนื่องมาจาก Apps Script ยังไม่ได้ตั้งค่า doGet ตัวเลือก action)
+        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+          throw new Error('ระบบส่งค่ากลับเป็นหน้าเว็บ HTML แทนที่จะเป็นข้อมูลพนักงาน JSON (กรุณาเพิ่มสคริปต์ doGet และ Deploy ใหม่ใน Google Apps Script)');
         }
-      }
 
-      matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
-      setStatus('โหลดข้อมูลพนักงานสำเร็จ (' + labeledDescriptors.length + ' คน)');
+        employeesData = JSON.parse(text);
+
+        const labeledDescriptors = [];
+        for (const emp of employeesData) {
+          try {
+            const img = await faceapi.fetchImage(emp.dataUrl);
+            const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+              .withFaceLandmarks().withFaceDescriptor();
+            if (detection) {
+              labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
+            }
+          } catch (e) {
+            console.warn('โหลดรูปพนักงานล้มเหลว:', emp.name);
+          }
+        }
+
+        if (labeledDescriptors.length > 0) {
+          matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
+          setStatus('โหลดข้อมูลพนักงานสำเร็จ (' + labeledDescriptors.length + ' คน)');
+        } else {
+          matcher = null;
+          setStatus('⚠️ ไม่พบภาพใบหน้าพนักงาน หรือสแกนหาใบหน้าในรูปไม่พบ');
+        }
+      } catch (err) {
+        console.error(err);
+        setStatus('⚠️ เกิดข้อผิดพลาดในการดึงข้อมูลพนักงาน: ' + err.message);
+      }
     }
 
     async function startCamera() {

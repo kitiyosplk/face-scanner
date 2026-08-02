@@ -12,9 +12,14 @@ const DRIVE_FOLDER_ID = 'ใส่_FOLDER_ID_ของคุณตรงนี�
 const SHEET_NAME = 'Attendance';
 
 /**
- * เสิร์ฟหน้าเว็บสแกนหน้า (เปิดผ่านลิงก์ Web App)
+ * เสิร์ฟหน้าเว็บสแกนหน้า (เปิดผ่านลิงก์ Web App) หรือดึงข้อมูลพนักงาน
  */
-function doGet() {
+function doGet(e) {
+  if (e && e.parameter && e.parameter.action === 'getEmployees') {
+    const employees = getEmployeePhotos();
+    return ContentService.createTextOutput(JSON.stringify(employees))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('ระบบสแกนใบหน้าเข้า-ออกงาน')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
@@ -113,4 +118,19 @@ function logAttendance(empId, empName, confidence) {
     timestamp: now.toISOString(),
     displayTime: Utilities.formatDate(now, tz, 'HH:mm:ss')
   };
+}
+
+/**
+ * บันทึกประวัติเข้า-ออกงานจากหน้าเว็บด้วยเมธอด POST
+ */
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const result = logAttendance(data.empId, data.name, data.confidence);
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }
