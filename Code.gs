@@ -43,18 +43,68 @@ function doPost(e) {
     const tz = Session.getScriptTimeZone();
     const todayStr = Utilities.formatDate(now, tz, "yyyy-MM-dd");
     const dataRange = sheet.getDataRange().getValues();
+    // 1. ค้นหาประวัติล่าสุดของพนักงานคนนี้ในวันนี้ (แยกเป็นแบบเวลาปกติ และเวลา OT)
+    let lastNormalAction = null;
+    let lastOTAction = null;
 
-    // 1. ตรวจสอบการสแกนซ้ำในวันเดียวกันสำหรับรายการสแกนประเภทนี้
     for (let i = dataRange.length - 1; i >= 1; i--) {
       const rowDate = new Date(dataRange[i][0]);
       const rowDateStr = Utilities.formatDate(rowDate, tz, "yyyy-MM-dd");
       const rowEmpId = String(dataRange[i][1]);
       const rowAction = dataRange[i][4];
 
-      if (rowEmpId === String(empId) && rowDateStr === todayStr && rowAction === actionType) {
+      if (rowEmpId === String(empId) && rowDateStr === todayStr) {
+        if (!lastNormalAction && (rowAction === "เข้างาน" || rowAction === "ออกงาน")) {
+          lastNormalAction = rowAction;
+        }
+        if (!lastOTAction && (rowAction === "เข้าทำ OT" || rowAction === "ออก OT")) {
+          lastOTAction = rowAction;
+        }
+        if (lastNormalAction && lastOTAction) {
+          break; // พบทั้งคู่แล้ว สามารถหยุดค้นหาได้
+        }
+      }
+    }
+
+    // 2. ตรวจสอบเงื่อนไขตามประเภทการสแกนปัจจุบัน
+    if (actionType === "เข้างาน") {
+      if (lastNormalAction === "เข้างาน") {
         return ContentService.createTextOutput(JSON.stringify({
           success: false,
-          error: `คุณได้ทำการสแกน "${actionType}" ไปแล้วก่อนหน้านี้สำหรับวันนี้`
+          error: "คุณได้ทำการสแกน 'เข้างาน' ไปแล้วและยังไม่ได้สแกน 'ออกงาน'"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    } else if (actionType === "ออกงาน") {
+      if (!lastNormalAction) {
+        return ContentService.createTextOutput(JSON.stringify({
+          success: false,
+          error: "ไม่พบประวัติการ 'เข้างาน' ในวันนี้ ไม่สามารถสแกน 'ออกงาน' ได้"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+      if (lastNormalAction === "ออกงาน") {
+        return ContentService.createTextOutput(JSON.stringify({
+          success: false,
+          error: "คุณได้ทำการสแกน 'ออกงาน' ไปแล้วก่อนหน้านี้"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    } else if (actionType === "เข้าทำ OT") {
+      if (lastOTAction === "เข้าทำ OT") {
+        return ContentService.createTextOutput(JSON.stringify({
+          success: false,
+          error: "คุณได้ทำการสแกน 'เข้าทำ OT' ไปแล้วและยังไม่ได้สแกน 'ออก OT'"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    } else if (actionType === "ออก OT") {
+      if (!lastOTAction) {
+        return ContentService.createTextOutput(JSON.stringify({
+          success: false,
+          error: "ไม่พบประวัติการ 'เข้าทำ OT' ในวันนี้ ไม่สามารถสแกน 'ออก OT' ได้"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+      if (lastOTAction === "ออก OT") {
+        return ContentService.createTextOutput(JSON.stringify({
+          success: false,
+          error: "คุณได้ทำการสแกน 'ออก OT' ไปแล้วก่อนหน้านี้"
         })).setMimeType(ContentService.MimeType.JSON);
       }
     }
