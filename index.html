@@ -186,7 +186,7 @@
     let lastLoggedTime = {};
     const COOLDOWN_MS = 8000;
     let currentFacingMode = 'user';
-    let hasBlinked = false;
+    let hasTurnedHead = false;
 
     function setStatus(text) {
       document.getElementById('status').innerText = text;
@@ -219,7 +219,7 @@
         await loadEmployees();
 
         if (matcher) {
-          setStatus('✅ พร้อมสแกน — กรุณามองกล้องให้เห็นหน้าชัดเจน');
+          setStatus('✅ พร้อมสแกน — กรุณามองกล้องและหันซ้าย/ขวาเล็กน้อยเพื่อยืนยันตัวตน');
           detectLoop();
         } else {
           setStatus('⚠️ กล้องพร้อมทำงาน แต่ยังไม่มีข้อมูลพนักงานเพื่อสแกนใบหน้า');
@@ -307,8 +307,9 @@
         if (isProcessing || !matcher) return;
         isProcessing = true;
 
+        // ใช้ TinyFaceDetector ในกล้องสดเพื่อการประมวลผลที่ลื่นไหลระดับ 300ms (ไม่มีกระตุก)
         const detection = await faceapi
-          .detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
           .withFaceLandmarks()
           .withFaceDescriptor();
 
@@ -319,22 +320,15 @@
           const match = matcher.findBestMatch(detection.descriptor);
           const resized = faceapi.resizeResults(detection, dims);
 
-          // คำนวณ Eye Aspect Ratio (EAR) เพื่อตรวจจับการกะพริบตา (Liveness Detection)
+          // คำนวณอัตราส่วนการหันหัว ซ้าย-ขวา (Liveness Head Turn Detection)
           const landmarks = resized.landmarks.positions;
-          const leftEye = landmarks.slice(36, 42);
-          const rightEye = landmarks.slice(42, 48);
+          const nose = landmarks[30];      // ปลายจมูก
+          const leftJaw = landmarks[2];    // ขอบกรามฝั่งซ้าย
+          const rightJaw = landmarks[14];  // ขอบกรามฝั่งขวา
 
-          const getDistance = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-          const getEAR = (eye) => {
-            const d_v1 = getDistance(eye[1], eye[5]);
-            const d_v2 = getDistance(eye[2], eye[4]);
-            const d_h = getDistance(eye[0], eye[3]);
-            return (d_v1 + d_v2) / (2.0 * d_h);
-          };
-
-          const leftEAR = getEAR(leftEye);
-          const rightEAR = getEAR(rightEye);
-          const avgEAR = (leftEAR + rightEAR) / 2;
+          const distLeft = Math.abs(nose.x - leftJaw.x);
+          const distRight = Math.abs(rightJaw.x - nose.x);
+          const yawRatio = distLeft / (distLeft + distRight);
 
           // วาดกรอบตรวจจับใบหน้าพร้อมแสดงชื่อผู้ใช้และเปอร์เซ็นต์ความมั่นใจ
           let boxLabel = 'ไม่พบพนักงานในระบบ';
@@ -343,8 +337,8 @@
             const name = empObj ? empObj.name : match.label;
             const matchPercent = ((1 - match.distance) * 100).toFixed(0);
             boxLabel = `${name} (${matchPercent}%)`;
-            if (!hasBlinked) {
-              boxLabel += ' - 🔒 กะพริบตาเพื่อบันทึก';
+            if (!hasTurnedHead) {
+              boxLabel += ' - 🔒 หันซ้าย/ขวาเพื่อบันทึก';
             } else {
               boxLabel += ' - 🔓 ยืนยันตัวตนแล้ว';
             }
@@ -366,19 +360,19 @@
             const now = Date.now();
             if (!lastLoggedTime[empId] || now - lastLoggedTime[empId] > COOLDOWN_MS) {
               
-              // ป้องกันการใช้รูปถ่าย: บังคับให้สแกนเจอกระพริบตา (EAR < 0.22 คือตามีขนาดแคบลง/ปิด)
-              if (!hasBlinked) {
-                setStatus('🔒 ตรวจพบพนักงาน ' + empName + ' — กรุณากะพริบตา 1 ครั้งเพื่อยืนยันตัวตน...');
-                if (avgEAR < 0.22) {
-                  hasBlinked = true;
-                  setStatus('🔓 ยืนยันตัวตนพนักงานสำเร็จ! กำลังส่งข้อมูลบันทึกเวลา...');
+              // ป้องกันการใช้รูปถ่าย: บังคับให้มีการหันหัวไปด้านข้างเล็กน้อย (ปกติอัตราส่วนจะอยู่ราวๆ 0.45 - 0.55)
+              if (!hasTurnedHead) {
+                setStatus('🔒 ตรวจพบคุณ ' + empName + ' — กรุณาหันหน้าไปทางซ้ายหรือขวาเล็กน้อยเพื่อยืนยันตัวตน...');
+                if (yawRatio < 0.33 || yawRatio > 0.67) {
+                  hasTurnedHead = true;
+                  setStatus('🔓 ยืนยันตัวตนสำเร็จ! กำลังบันทึกเวลา...');
                 }
                 isProcessing = false;
                 return;
               }
 
               lastLoggedTime[empId] = now;
-              hasBlinked = false; // รีเซ็ตสำหรับรอบถัดไป
+              hasTurnedHead = false; // รีเซ็ตสำหรับรอบถัดไป
 
               const actionType = document.getElementById('actionType').value;
               setStatus('พบใบหน้า: ' + empName + ' (' + actionType + ') — กำลังบันทึก...');
@@ -389,14 +383,12 @@
               canvas.height = video.videoHeight || 480;
               const ctx = canvas.getContext('2d');
               
-              // วาดรูปจากกล้อง (สลับซ้ายขวาตามโหมดกล้องหน้าเพื่อให้ภาพตรงกับที่ผู้ใช้เห็น)
               if (currentFacingMode === 'user') {
                 ctx.translate(canvas.width, 0);
                 ctx.scale(-1, 1);
               }
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
               
-              // คืนค่ารูปแบบทรานสเลชั่นปกติ
               if (currentFacingMode === 'user') {
                 ctx.setTransform(1, 0, 0, 1, 0, 0);
               }
@@ -435,12 +427,11 @@
             }
           }
         } else {
-          // หากไม่มีการตรวจพบใบหน้า ให้รีเซ็ตสถานะสแกนกะพริบตา
-          hasBlinked = false;
+          hasTurnedHead = false;
         }
 
         isProcessing = false;
-      }, 1200);
+      }, 300);
     }
 
     init();
