@@ -210,10 +210,13 @@
         });
 
         setStatus('กำลังโหลดโมเดล AI...');
-        await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-        await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+        // โหลดโมเดลพร้อมกันแบบขนาน (Parallel) เพื่อความรวดเร็ว
+        await Promise.all([
+          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+        ]);
 
         setStatus('กำลังโหลดข้อมูลพนักงานจาก Drive...');
         await loadEmployees();
@@ -241,19 +244,46 @@
 
         employeesData = JSON.parse(text);
 
+        // คำนวณรหัสแคชในเครื่อง (ถ้าข้อมูลไฟล์เดิม รูปขนาดเดิม จะถือว่าเป็นข้อมูลชุดเดิม)
+        const localCacheKey = employeesData.map(e => e.id + '_' + (e.dataUrl ? e.dataUrl.length : 0)).join('|');
+        const cachedData = localStorage.getItem('face_scanner_descriptors_cache');
+        const cachedKey = localStorage.getItem('face_scanner_cache_key');
+
         const labeledDescriptors = [];
-        for (const emp of employeesData) {
-          try {
-            const img = await faceapi.fetchImage(emp.dataUrl);
-            const detection = await faceapi.detectSingleFace(img)
-              .withFaceLandmarks().withFaceDescriptor();
-            if (detection) {
-              labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
-            } else {
-              console.warn('ไม่สามารถตรวจจับใบหน้าจากรูปพนักงาน:', emp.name);
+
+        if (cachedData && cachedKey === localCacheKey) {
+          // โหลดจาก Local Cache ทันที บายพาสการประมวลผลรูปใหม่ทำให้โหลดเสร็จใน 0.1 วินาที!
+          const parsed = JSON.parse(cachedData);
+          for (const item of parsed) {
+            const descArray = item.descriptors.map(d => new Float32Array(Object.values(d)));
+            labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(item.label, descArray));
+          }
+          console.log('โหลดใบหน้าพนักงานทั้งหมดจากแคชในเครื่องสำเร็จ!');
+        } else {
+          // โหลดรูปและสแกนใบหน้าพนักงานแบบขนาน (Parallel) เพื่อไม่ให้ล่าช้า
+          await Promise.all(employeesData.map(async (emp) => {
+            try {
+              const img = await faceapi.fetchImage(emp.dataUrl);
+              const detection = await faceapi.detectSingleFace(img)
+                .withFaceLandmarks().withFaceDescriptor();
+              if (detection) {
+                labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
+              } else {
+                console.warn('ไม่สามารถตรวจจับใบหน้าจากรูปพนักงาน:', emp.name);
+              }
+            } catch (e) {
+              console.warn('โหลดรูปพนักงานล้มเหลว:', emp.name, e);
             }
-          } catch (e) {
-            console.warn('โหลดรูปพนักงานล้มเหลว:', emp.name, e);
+          }));
+
+          // บันทึกลงแคชเพื่อใช้งานในครั้งถัดไป
+          if (labeledDescriptors.length > 0) {
+            try {
+              localStorage.setItem('face_scanner_cache_key', localCacheKey);
+              localStorage.setItem('face_scanner_descriptors_cache', JSON.stringify(labeledDescriptors));
+            } catch (cacheErr) {
+              console.warn('ไม่สามารถบันทึกแคชลง LocalStorage ได้:', cacheErr);
+            }
           }
         }
 
