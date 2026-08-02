@@ -281,8 +281,9 @@
         if (isProcessing || !matcher) return;
         isProcessing = true;
 
+        // ใช้ SsdMobilenetv1 ในการตรวจจับใบหน้าผ่านกล้องสด เพื่อความแม่นยำสูงและรวดเร็ว
         const detection = await faceapi
-          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+          .detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
           .withFaceLandmarks()
           .withFaceDescriptor();
 
@@ -290,10 +291,25 @@
         overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
 
         if (detection) {
-          const resized = faceapi.resizeResults(detection, dims);
-          faceapi.draw.drawDetections(overlay, resized);
-
           const match = matcher.findBestMatch(detection.descriptor);
+          const resized = faceapi.resizeResults(detection, dims);
+
+          // วาดกรอบตรวจจับใบหน้าพร้อมแสดงชื่อผู้ใช้และเปอร์เซ็นต์ความมั่นใจ
+          let boxLabel = 'ไม่พบพนักงานในระบบ';
+          if (match.label !== 'unknown') {
+            const empObj = employeesData.find(e => e.id === match.label);
+            const name = empObj ? empObj.name : match.label;
+            const matchPercent = ((1 - match.distance) * 100).toFixed(0);
+            boxLabel = `${name} (${matchPercent}%)`;
+          }
+
+          const box = resized.detection.box;
+          const drawBox = new faceapi.draw.DrawBox(box, { 
+            label: boxLabel, 
+            boxColor: match.label !== 'unknown' ? '#10b981' : '#ef4444' 
+          });
+          drawBox.draw(overlay);
+
           if (match.label !== 'unknown') {
             const empId = match.label;
             const empObj = employeesData.find(e => e.id === empId);
@@ -327,6 +343,10 @@
                   })
                 });
                 const data = await res.json();
+
+                if (!data.success) {
+                  throw new Error(data.error || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+                }
 
                 const resultEl = document.getElementById('result');
                 if (actionType === 'เข้างาน') resultEl.className = 'result-in';

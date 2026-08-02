@@ -41,6 +41,23 @@ function doPost(e) {
     
     const now = new Date();
     const tz = Session.getScriptTimeZone();
+    const todayStr = Utilities.formatDate(now, tz, "yyyy-MM-dd");
+    const dataRange = sheet.getDataRange().getValues();
+
+    // 1. ตรวจสอบการสแกนซ้ำในวันเดียวกันสำหรับรายการสแกนประเภทนี้
+    for (let i = dataRange.length - 1; i >= 1; i--) {
+      const rowDate = new Date(dataRange[i][0]);
+      const rowDateStr = Utilities.formatDate(rowDate, tz, "yyyy-MM-dd");
+      const rowEmpId = String(dataRange[i][1]);
+      const rowAction = dataRange[i][4];
+
+      if (rowEmpId === String(empId) && rowDateStr === todayStr && rowAction === actionType) {
+        return ContentService.createTextOutput(JSON.stringify({
+          success: false,
+          error: `คุณได้ทำการสแกน "${actionType}" ไปแล้วก่อนหน้านี้สำหรับวันนี้`
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
     
     let otHours = "";
     let otRate = "";
