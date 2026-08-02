@@ -72,7 +72,6 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transform: scaleX(-1); /* สลับซ้ายขวา (Mirror) เพื่อให้เหมือนส่องกระจก */
     }
 
     #status {
@@ -148,14 +147,17 @@
 <body>
   <h1>🕒 ระบบสแกนใบหน้าเข้า-ออกงานและ OT</h1>
 
-  <div class="control-group">
-    <label for="actionType">เลือกรายการลงเวลา:</label>
-    <select id="actionType">
-      <option value="เข้างาน">เข้างานปกติ</option>
-      <option value="ออกงาน">ออกงานปกติ</option>
-      <option value="เข้าทำ OT">เข้าทำ OT</option>
-      <option value="ออก OT">ออก OT (คำนวณเงินอัตโนมัติ)</option>
-    </select>
+  <div class="control-group" style="display: flex; gap: 8px; align-items: flex-end;">
+    <div style="flex: 1;">
+      <label for="actionType">เลือกรายการลงเวลา:</label>
+      <select id="actionType">
+        <option value="เข้างาน">เข้างานปกติ</option>
+        <option value="ออกงาน">ออกงานปกติ</option>
+        <option value="เข้าทำ OT">เข้าทำ OT</option>
+        <option value="ออก OT">ออก OT (คำนวณเงินอัตโนมัติ)</option>
+      </select>
+    </div>
+    <button id="switchCamBtn" style="padding: 10px 16px; font-size: 16px; border-radius: 8px; border: 2px solid #334155; background: #1e293b; color: #f1f5f9; cursor: pointer; height: 44px; font-weight: 600;">🔄 สลับกล้อง</button>
   </div>
 
   <div class="video-wrap">
@@ -183,6 +185,8 @@
     let isProcessing = false;
     let lastLoggedTime = {};
     const COOLDOWN_MS = 8000;
+    let currentFacingMode = 'user';
+    let hasBlinked = false;
 
     function setStatus(text) {
       document.getElementById('status').innerText = text;
@@ -192,6 +196,18 @@
       try {
         setStatus('กำลังเปิดกล้อง...');
         await startCamera();
+
+        // เชื่อมโยงปุ่มสลับกล้อง
+        document.getElementById('switchCamBtn').addEventListener('click', async () => {
+          currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+          setStatus('กำลังสลับกล้อง...');
+          try {
+            await startCamera();
+            setStatus('✅ สลับกล้องสำเร็จ — พร้อมสแกน');
+          } catch (err) {
+            setStatus('❌ สลับกล้องล้มเหลว: ' + err.message);
+          }
+        });
 
         setStatus('กำลังโหลดโมเดล AI...');
         await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
@@ -219,9 +235,8 @@
         const response = await fetch(WEB_APP_URL + '?action=getEmployees');
         const text = await response.text();
         
-        // ตรวจสอบว่าผลลัพธ์เป็น HTML (อาจเนื่องมาจาก Apps Script ยังไม่ได้ตั้งค่า doGet ตัวเลือก action)
         if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
-          throw new Error('ระบบส่งค่ากลับเป็นหน้าเว็บ HTML แทนที่จะเป็นข้อมูลพนักงาน JSON (กรุณาเพิ่มสคริปต์ doGet และ Deploy ใหม่ใน Google Apps Script)');
+          throw new Error('ระบบส่งค่ากลับเป็น HTML แทนพนักงาน JSON');
         }
 
         employeesData = JSON.parse(text);
@@ -230,7 +245,6 @@
         for (const emp of employeesData) {
           try {
             const img = await faceapi.fetchImage(emp.dataUrl);
-            // ใช้ SsdMobilenetv1 (ค่าเริ่มต้น) เพื่อความแม่นยำสูงกับรูปถ่ายนิ่งของพนักงาน
             const detection = await faceapi.detectSingleFace(img)
               .withFaceLandmarks().withFaceDescriptor();
             if (detection) {
@@ -258,10 +272,21 @@
 
     async function startCamera() {
       const video = document.getElementById('video');
+      const overlay = document.getElementById('overlay');
+
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+        video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } }
       });
       video.srcObject = stream;
+
+      // จัดการ Mirror ซ้ายขวา: กล้องหน้าให้ Mirror, กล้องหลังไม่ต้อง Mirror
+      video.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
+      overlay.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
+
       return new Promise(resolve => (video.onloadedmetadata = resolve));
     }
 
@@ -282,7 +307,6 @@
         if (isProcessing || !matcher) return;
         isProcessing = true;
 
-        // ใช้ SsdMobilenetv1 ในการตรวจจับใบหน้าผ่านกล้องสด เพื่อความแม่นยำสูงและรวดเร็ว
         const detection = await faceapi
           .detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
           .withFaceLandmarks()
@@ -295,6 +319,23 @@
           const match = matcher.findBestMatch(detection.descriptor);
           const resized = faceapi.resizeResults(detection, dims);
 
+          // คำนวณ Eye Aspect Ratio (EAR) เพื่อตรวจจับการกะพริบตา (Liveness Detection)
+          const landmarks = resized.landmarks.positions;
+          const leftEye = landmarks.slice(36, 42);
+          const rightEye = landmarks.slice(42, 48);
+
+          const getDistance = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+          const getEAR = (eye) => {
+            const d_v1 = getDistance(eye[1], eye[5]);
+            const d_v2 = getDistance(eye[2], eye[4]);
+            const d_h = getDistance(eye[0], eye[3]);
+            return (d_v1 + d_v2) / (2.0 * d_h);
+          };
+
+          const leftEAR = getEAR(leftEye);
+          const rightEAR = getEAR(rightEye);
+          const avgEAR = (leftEAR + rightEAR) / 2;
+
           // วาดกรอบตรวจจับใบหน้าพร้อมแสดงชื่อผู้ใช้และเปอร์เซ็นต์ความมั่นใจ
           let boxLabel = 'ไม่พบพนักงานในระบบ';
           if (match.label !== 'unknown') {
@@ -302,6 +343,11 @@
             const name = empObj ? empObj.name : match.label;
             const matchPercent = ((1 - match.distance) * 100).toFixed(0);
             boxLabel = `${name} (${matchPercent}%)`;
+            if (!hasBlinked) {
+              boxLabel += ' - 🔒 กะพริบตาเพื่อบันทึก';
+            } else {
+              boxLabel += ' - 🔓 ยืนยันตัวตนแล้ว';
+            }
           }
 
           const box = resized.detection.box;
@@ -319,7 +365,21 @@
 
             const now = Date.now();
             if (!lastLoggedTime[empId] || now - lastLoggedTime[empId] > COOLDOWN_MS) {
+              
+              // ป้องกันการใช้รูปถ่าย: บังคับให้สแกนเจอกระพริบตา (EAR < 0.22 คือตามีขนาดแคบลง/ปิด)
+              if (!hasBlinked) {
+                setStatus('🔒 ตรวจพบพนักงาน ' + empName + ' — กรุณากะพริบตา 1 ครั้งเพื่อยืนยันตัวตน...');
+                if (avgEAR < 0.22) {
+                  hasBlinked = true;
+                  setStatus('🔓 ยืนยันตัวตนพนักงานสำเร็จ! กำลังส่งข้อมูลบันทึกเวลา...');
+                }
+                isProcessing = false;
+                return;
+              }
+
               lastLoggedTime[empId] = now;
+              hasBlinked = false; // รีเซ็ตสำหรับรอบถัดไป
+
               const actionType = document.getElementById('actionType').value;
               setStatus('พบใบหน้า: ' + empName + ' (' + actionType + ') — กำลังบันทึก...');
 
@@ -328,7 +388,18 @@
               canvas.width = video.videoWidth || 640;
               canvas.height = video.videoHeight || 480;
               const ctx = canvas.getContext('2d');
+              
+              // วาดรูปจากกล้อง (สลับซ้ายขวาตามโหมดกล้องหน้าเพื่อให้ภาพตรงกับที่ผู้ใช้เห็น)
+              if (currentFacingMode === 'user') {
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+              }
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              
+              // คืนค่ารูปแบบทรานสเลชั่นปกติ
+              if (currentFacingMode === 'user') {
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+              }
               const snapshotBase64 = canvas.toDataURL('image/jpeg', 0.8);
 
               try {
@@ -363,6 +434,9 @@
               }
             }
           }
+        } else {
+          // หากไม่มีการตรวจพบใบหน้า ให้รีเซ็ตสถานะสแกนกะพริบตา
+          hasBlinked = false;
         }
 
         isProcessing = false;
