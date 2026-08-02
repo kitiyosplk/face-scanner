@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบสแกนใบหน้าเข้า-ออกงานและ OT</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', 'Sarabun', sans-serif;
+      background: #0f172a;
+      color: #f1f5f9;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 22px;
+      margin: 10px 0 15px;
+      text-align: center;
+    }
+
+    .control-group {
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 12px;
+      text-align: left;
+    }
+
+    .control-group label {
+      font-size: 14px;
+      color: #94a3b8;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: 2px solid #334155;
+      background: #1e293b;
+      color: #f1f5f9;
+      outline: none;
+    }
+
+    .video-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+      aspect-ratio: 4/3;
+      background: #000;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 4px solid #334155;
+    }
+
+    video,
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #status {
+      margin-top: 15px;
+      font-size: 16px;
+      font-weight: 600;
+      text-align: center;
+      min-height: 24px;
+    }
+
+    #result {
+      margin-top: 8px;
+      font-size: 20px;
+      font-weight: 800;
+      text-align: center;
+      min-height: 36px;
+      padding: 6px 16px;
+      border-radius: 10px;
+      transition: all 0.2s;
+    }
+
+    .result-in {
+      background: #14532d;
+      color: #86efac;
+    }
+
+    .result-out {
+      background: #7c2d12;
+      color: #fdba74;
+    }
+
+    .result-ot-in {
+      background: #1e3a8a;
+      color: #93c5fd;
+    }
+
+    .result-ot-out {
+      background: #581c87;
+      color: #d8b4fe;
+    }
+
+    .log-list {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .log-list h3 {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+
+    .log-item {
+      display: flex;
+      justify-content: space-between;
+      background: #1e293b;
+      padding: 8px 12px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .badge {
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 11px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>🕒 ระบบสแกนใบหน้าเข้า-ออกงานและ OT</h1>
+
+  <div class="control-group">
+    <label for="actionType">เลือกรายการลงเวลา:</label>
+    <select id="actionType">
+      <option value="เข้างาน">เข้างานปกติ</option>
+      <option value="ออกงาน">ออกงานปกติ</option>
+      <option value="เข้าทำ OT">เข้าทำ OT</option>
+      <option value="ออก OT">ออก OT (คำนวณเงินอัตโนมัติ)</option>
+    </select>
+  </div>
+
+  <div class="video-wrap">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <div id="status">กำลังเริ่มต้นระบบ...</div>
+  <div id="result"></div>
+
+  <div class="log-list">
+    <h3>รายการล่าสุด</h3>
+    <div id="logItems"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <script>
+    const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+
+    // URL ของ Apps Script ที่พี่ปิ๊ก Deploy ไว้
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxYd1DDEb7QUldQ-iQhY8lxgHENwrbg1NHCFBfLBqcfnM3s_Er6lBX8H38N7p6N7AElZQ/exec';
+
+    let employeesData = [];
+    let matcher = null;
+    let isProcessing = false;
+    let lastLoggedTime = {};
+    const COOLDOWN_MS = 8000;
+
+    function setStatus(text) {
+      document.getElementById('status').innerText = text;
+    }
+
+    async function init() {
+      try {
+        setStatus('กำลังโหลดโมเดล AI...');
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+        setStatus('กำลังโหลดข้อมูลพนักงานจาก Drive...');
+        await loadEmployees();
+
+        setStatus('กำลังเปิดกล้อง...');
+        await startCamera();
+
+        setStatus('✅ พร้อมสแกน — กรุณามองกล้องให้เห็นหน้าชัดเจน');
+        detectLoop();
+      } catch (err) {
+        console.error(err);
+        setStatus('❌ เกิดข้อผิดพลาด: ' + err.message);
+      }
+    }
+
+    async function loadEmployees() {
+      const response = await fetch(WEB_APP_URL + '?action=getEmployees');
+      employeesData = await response.json();
+
+      const labeledDescriptors = [];
+      for (const emp of employeesData) {
+        try {
+          const img = await faceapi.fetchImage(emp.dataUrl);
+          const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+            .withFaceLandmarks().withFaceDescriptor();
+          if (detection) {
+            labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
+          }
+        } catch (e) {
+          console.warn('โหลดรูปพนักงานล้มเหลว:', emp.name);
+        }
+      }
+
+      matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
+      setStatus('โหลดข้อมูลพนักงานสำเร็จ (' + labeledDescriptors.length + ' คน)');
+    }
+
+    async function startCamera() {
+      const video = document.getElementById('video');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+      });
+      video.srcObject = stream;
+      return new Promise(resolve => (video.onloadedmetadata = resolve));
+    }
+
+    function addLogItem(name, type, time) {
+      const container = document.getElementById('logItems');
+      const div = document.createElement('div');
+      div.className = 'log-item';
+      div.innerHTML = `<span>${name}</span><span class="badge" style="background:#334155; color:#fff;">${type} • ${time}</span>`;
+      container.prepend(div);
+      while (container.children.length > 8) container.removeChild(container.lastChild);
+    }
+
+    function detectLoop() {
+      const video = document.getElementById('video');
+      const overlay = document.getElementById('overlay');
+
+      setInterval(async () => {
+        if (isProcessing || !matcher) return;
+        isProcessing = true;
+
+        const detection = await faceapi
+          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        const dims = faceapi.matchDimensions(overlay, video, true);
+        overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+
+        if (detection) {
+          const resized = faceapi.resizeResults(detection, dims);
+          faceapi.draw.drawDetections(overlay, resized);
+
+          const match = matcher.findBestMatch(detection.descriptor);
+          if (match.label !== 'unknown') {
+            const empId = match.label;
+            const empObj = employeesData.find(e => e.id === empId);
+            const empName = empObj ? empObj.name : empId;
+            const empDept = empObj ? empObj.department : 'ทั่วไป';
+
+            const now = Date.now();
+            if (!lastLoggedTime[empId] || now - lastLoggedTime[empId] > COOLDOWN_MS) {
+              lastLoggedTime[empId] = now;
+              const actionType = document.getElementById('actionType').value;
+              setStatus('พบใบหน้า: ' + empName + ' (' + actionType + ') — กำลังบันทึก...');
+
+              // ถ่ายภาพ Snapshot เป็นหลักฐาน
+              const canvas = document.createElement('canvas');
+              canvas.width = video.videoWidth || 640;
+              canvas.height = video.videoHeight || 480;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const snapshotBase64 = canvas.toDataURL('image/jpeg', 0.8);
+
+              try {
+                const res = await fetch(WEB_APP_URL, {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    empId: empId,
+                    name: empName,
+                    department: empDept,
+                    actionType: actionType,
+                    confidence: (1 - match.distance).toFixed(2),
+                    snapshot: snapshotBase64
+                  })
+                });
+                const data = await res.json();
+
+                const resultEl = document.getElementById('result');
+                if (actionType === 'เข้างาน') resultEl.className = 'result-in';
+                else if (actionType === 'ออกงาน') resultEl.className = 'result-out';
+                else if (actionType === 'เข้าทำ OT') resultEl.className = 'result-ot-in';
+                else if (actionType === 'ออก OT') resultEl.className = 'result-ot-out';
+
+                resultEl.innerText = `${empName} — ${actionType} (${data.displayTime})${data.otTotal ? ' [OT: ' + data.otTotal + ' ฿]' : ''}`;
+                addLogItem(empName, actionType, data.displayTime);
+                setStatus('✅ พร้อมสแกน — กรุณามองกล้องให้เห็นหน้าชัดเจน');
+              } catch (e) {
+                setStatus('❌ บันทึกไม่สำเร็จ: ' + e.message);
+              }
+            }
+          }
+        }
+
+        isProcessing = false;
+      }, 1200);
+    }
+
+    init();
+  </script>
+</body>
+
+</html>
