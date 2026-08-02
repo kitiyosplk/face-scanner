@@ -1,67 +1,148 @@
-/**
- * ระบบสแกนใบหน้าเข้า-ออกงาน
- * ------------------------------------------------------
- * วิธีตั้งค่า:
- * 1. เปลี่ยนค่า DRIVE_FOLDER_ID ด้านล่างเป็น Folder ID ของโฟลเดอร์รูปพนักงานใน Drive
- * 2. ชื่อไฟล์รูปพนักงานควรตั้งเป็น "รหัสพนักงาน_ชื่อพนักงาน.jpg" เช่น "EMP001_สมชาย ใจดี.jpg"
- *    (ถ้าไม่มี "_" ระบบจะใช้ชื่อไฟล์ทั้งหมดเป็นทั้งรหัสและชื่อ)
- * ------------------------------------------------------
- */
-
-const DRIVE_FOLDER_ID = 'ใส่_FOLDER_ID_ของคุณตรงนี้'; // <-- แก้ตรงนี้
-const SHEET_NAME = 'Attendance';
+const SPREADSHEET_ID = '1VkTCXAkbc0yc_my7ZeZG9utUdLpfCDPc4g1P9RvVcT4';
+const REG_FOLDER_ID = '1M-8AIn5zzKqTreTghYgogg-2S8Wfb5tq'; // โฟลเดอร์ ลงทะเบียน
+const SCAN_FOLDER_ID = '1dyzkvfwflEILGJ4shzXn_bypCk2jOynO'; // โฟลเดอร์ สแกนเข้างาน
 
 /**
- * เสิร์ฟหน้าเว็บสแกนหน้า (เปิดผ่านลิงก์ Web App) หรือดึงข้อมูลพนักงาน
+ * รองรับการดึงข้อมูลพนักงานผ่าน GET Request จาก Vercel
  */
 function doGet(e) {
-  if (e && e.parameter && e.parameter.action === 'getEmployees') {
-    const employees = getEmployeePhotos();
-    return ContentService.createTextOutput(JSON.stringify(employees))
+  try {
+    const action = e.parameter.action || 'getEmployees';
+    
+    if (action === 'getEmployees') {
+      const data = getEmployeePhotos();
+      return ContentService.createTextOutput(JSON.stringify(data))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({error: 'Invalid action'}))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({error: err.toString()}))
       .setMimeType(ContentService.MimeType.JSON);
   }
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('ระบบสแกนใบหน้าเข้า-ออกงาน')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
- * คืนค่าข้อมูลเบา ๆ (จำนวนไฟล์ + เวลาแก้ไขล่าสุด) ใช้เช็คว่าต้องโหลดรูปใหม่ทั้งหมดหรือไม่
- * เพื่อให้หน้าเว็บ cache ข้อมูลใบหน้าไว้ใน localStorage แล้วเปิดครั้งถัดไปเร็วขึ้น
+ * รองรับการบันทึกเวลาและอัปโหลดรูปภาพผ่าน POST Request จาก Vercel
  */
-function getEmployeeMeta() {
-  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
-  const files = folder.getFilesByType(MimeType.JPEG);
-  const files2 = folder.getFilesByType(MimeType.PNG);
-  let count = 0;
-  let lastUpdatedSum = 0;
-  const collect = (iterator) => {
-    while (iterator.hasNext()) {
-      const f = iterator.next();
-      count++;
-      lastUpdatedSum += f.getLastUpdated().getTime();
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const empId = data.empId;
+    const empName = data.name;
+    const department = data.department;
+    const actionType = data.actionType;
+    const confidence = data.confidence;
+    const snapshotBase64 = data.snapshot;
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheet = ss.getActiveSheet();
+    
+    const now = new Date();
+    const tz = Session.getScriptTimeZone();
+    
+    let otHours = "";
+    let otRate = "";
+    let otTotal = "";
+    let remarks = "สแกนหน้าสำเร็จ";
+
+    // บันทึกภาพถ่ายจริงลงในโฟลเดอร์ "สแกนเข้างาน"
+    if (snapshotBase64) {
+      try {
+        const scanFolder = DriveApp.getFolderById(SCAN_FOLDER_ID);
+        const timeStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd_HHmmss');
+        const fileName = empId + "_" + empName + "_" + actionType + "_" + timeStr + ".jpg";
+        
+        const base64Data = snapshotBase64.split(",")[1];
+        const decodedBytes = Utilities.base64Decode(base64Data);
+        const blob = Utilities.newBlob(decodedBytes, "image/jpeg", fileName);
+        scanFolder.createFile(blob);
+        remarks = "บันทึกรูปหลักฐานสำเร็จ";
+      } catch (imgErr) {
+        remarks = "บันทึกรูปไม่สำเร็จ: " + imgErr.toString();
+      }
     }
-  };
-  collect(files);
-  collect(files2);
-  return { cacheKey: count + '-' + lastUpdatedSum };
+
+    // ระบบคำนวณ OT อัตโนมัติ (70 บาท/ชั่วโมง)
+    if (actionType === "ออก OT") {
+      otRate = 70;
+      const todayStr = Utilities.formatDate(now, tz, "yyyy-MM-dd");
+      const dataRange = sheet.getDataRange().getValues();
+      let startTime = null;
+
+      for (let i = dataRange.length - 1; i >= 1; i--) {
+        const rowDate = new Date(dataRange[i][0]);
+        const rowDateStr = Utilities.formatDate(rowDate, tz, "yyyy-MM-dd");
+        const rowEmpId = String(dataRange[i][1]);
+        const rowAction = dataRange[i][4];
+
+        if (rowEmpId === String(empId) && rowDateStr === todayStr && rowAction === "เข้าทำ OT") {
+          startTime = rowDate;
+          break;
+        }
+      }
+
+      if (startTime) {
+        const diffMs = now - startTime;
+        otHours = Number((diffMs / (1000 * 60 * 60)).toFixed(2));
+        otTotal = otHours * otRate;
+        remarks += " | คำนวณ OT อัตโนมัติสำเร็จ";
+      } else {
+        otHours = 0;
+        otTotal = 0;
+        remarks += " | ไม่พบรายการ 'เข้าทำ OT' ในวันนี้";
+      }
+    } else if (actionType === "เข้าทำ OT") {
+      otRate = 70;
+    }
+
+    // บันทึกลง Google Sheets ตามคอลัมน์ A ถึง K
+    sheet.appendRow([
+      now,
+      empId,
+      empName,
+      department,
+      actionType,
+      otHours,
+      otRate,
+      otTotal,
+      (parseFloat(confidence) * 100).toFixed(2) + "%",
+      "ปกติ",
+      remarks
+    ]);
+
+    const displayTime = Utilities.formatDate(now, tz, 'HH:mm:ss');
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      actionType: actionType,
+      displayTime: displayTime,
+      otTotal: otTotal
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 /**
- * ดึงรูปพนักงานทั้งหมดจาก Drive แปลงเป็น base64 ส่งให้ frontend ไปตรวจจับใบหน้าเอง
+ * ฟังก์ชันดึงรูปพนักงานจากโฟลเดอร์ "ลงทะเบียน"
  */
 function getEmployeePhotos() {
-  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  const folder = DriveApp.getFolderById(REG_FOLDER_ID);
   const employees = [];
-
+  
   const addFromIterator = (iterator) => {
     while (iterator.hasNext()) {
       const file = iterator.next();
-      const rawName = file.getName().replace(/\.[^/.]+$/, ''); // ตัดนามสกุลไฟล์ออก
+      const rawName = file.getName().replace(/\.[^/.]+$/, '');
       const parts = rawName.split('_');
       const empId = parts[0].trim();
-      const empName = parts.length > 1 ? parts.slice(1).join('_').trim() : empId;
+      const empName = parts.length > 1 ? parts[1].trim() : empId;
+      const department = parts.length > 2 ? parts[2].trim() : 'ทั่วไป';
 
       const blob = file.getBlob();
       const base64 = Utilities.base64Encode(blob.getBytes());
@@ -70,6 +151,7 @@ function getEmployeePhotos() {
       employees.push({
         id: empId,
         name: empName,
+        department: department,
         dataUrl: 'data:' + mimeType + ';base64,' + base64
       });
     }
@@ -77,60 +159,5 @@ function getEmployeePhotos() {
 
   addFromIterator(folder.getFilesByType(MimeType.JPEG));
   addFromIterator(folder.getFilesByType(MimeType.PNG));
-
   return employees;
-}
-
-/**
- * บันทึกเวลาเข้า/ออกงานลง Google Sheet
- * จะสลับ IN/OUT ให้อัตโนมัติตามประวัติล่าสุดของพนักงานคนนั้นในวันเดียวกัน
- */
-function logAttendance(empId, empName, confidence) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(SHEET_NAME);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEET_NAME);
-    sheet.appendRow(['เวลา (Timestamp)', 'รหัสพนักงาน', 'ชื่อ', 'ประเภท', 'ความมั่นใจ (Confidence)']);
-    sheet.getRange(1, 1, 1, 5).setFontWeight('bold');
-  }
-
-  const now = new Date();
-  const tz = Session.getScriptTimeZone();
-  const today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
-
-  // หาประเภทล่าสุดของพนักงานคนนี้ในวันนี้ เพื่อสลับ IN/OUT
-  const data = sheet.getDataRange().getValues();
-  let lastType = null;
-  for (let i = data.length - 1; i >= 1; i--) {
-    const rowDate = Utilities.formatDate(new Date(data[i][0]), tz, 'yyyy-MM-dd');
-    if (String(data[i][1]) === String(empId) && rowDate === today) {
-      lastType = data[i][3];
-      break;
-    }
-  }
-
-  const type = (lastType === 'IN') ? 'OUT' : 'IN';
-  sheet.appendRow([now, empId, empName, type, confidence]);
-
-  return {
-    success: true,
-    type: type,
-    timestamp: now.toISOString(),
-    displayTime: Utilities.formatDate(now, tz, 'HH:mm:ss')
-  };
-}
-
-/**
- * บันทึกประวัติเข้า-ออกงานจากหน้าเว็บด้วยเมธอด POST
- */
-function doPost(e) {
-  try {
-    const data = JSON.parse(e.postData.contents);
-    const result = logAttendance(data.empId, data.name, data.confidence);
-    return ContentService.createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
 }
