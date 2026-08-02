@@ -193,6 +193,7 @@
         await startCamera();
 
         setStatus('กำลังโหลดโมเดล AI...');
+        await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
         await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
         await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
         await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
@@ -228,13 +229,16 @@
         for (const emp of employeesData) {
           try {
             const img = await faceapi.fetchImage(emp.dataUrl);
-            const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+            // ใช้ SsdMobilenetv1 (ค่าเริ่มต้น) เพื่อความแม่นยำสูงกับรูปถ่ายนิ่งของพนักงาน
+            const detection = await faceapi.detectSingleFace(img)
               .withFaceLandmarks().withFaceDescriptor();
             if (detection) {
               labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
+            } else {
+              console.warn('ไม่สามารถตรวจจับใบหน้าจากรูปพนักงาน:', emp.name);
             }
           } catch (e) {
-            console.warn('โหลดรูปพนักงานล้มเหลว:', emp.name);
+            console.warn('โหลดรูปพนักงานล้มเหลว:', emp.name, e);
           }
         }
 
