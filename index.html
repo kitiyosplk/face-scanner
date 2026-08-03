@@ -392,7 +392,8 @@
         }));
 
         if (labeledDescriptors.length > 0) {
-          matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6); // 0.6 = ยืดหยุ่นขึ้น จำหน้าง่าย
+          // 🔒 ปรับตรงนี้: ใช้ 0.42 เพื่อความปลอดภัยสูงสุด คนละหน้าจะไม่มีทางสแกนติด
+          matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.42);
         }
       } catch (err) {
         setStatus('⚠️ เกิดข้อผิดพลาดโหลดข้อมูล: ' + err.message);
@@ -515,8 +516,11 @@
         try {
           const detection = await faceapi.detectSingleFace(
             video,
-            new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.35 })
+            // 🔒 ปรับตรงนี้: inputSize: 320 และ scoreThreshold: 0.50
+            new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.50 })
           ).withFaceLandmarks().withFaceDescriptor();
+
+          // ... (โค้ดส่วนอื่นคงเดิม) ...
 
           const dims = faceapi.matchDimensions(overlay, video, true);
           const ctx = overlay.getContext('2d');
