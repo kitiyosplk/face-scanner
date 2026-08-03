@@ -5,6 +5,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ระบบสแกนใบหน้าเข้า-ออกงานและ OT</title>
+
+  <!-- PWA Meta Tags & Inline Manifest -->
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest"
+    href="data:application/json;charset=utf-8,%7B%22name%22%3A%22ระบบสแกนใบหน้า%22%2C%22short_name%22%3A%22FaceScan%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230f172a%22%2C%22theme_color%22%3A%22%230f172a%22%7D">
+
   <style>
     * {
       box-sizing: border-box;
@@ -19,38 +27,65 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 20px;
+      padding: 15px;
     }
 
     h1 {
-      font-size: 22px;
-      margin: 10px 0 15px;
+      font-size: 20px;
+      margin: 5px 0 10px;
       text-align: center;
+    }
+
+    .nav-tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid #334155;
+      background: #1e293b;
+      color: #94a3b8;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .tab-btn.active {
+      background: #2563eb;
+      color: #fff;
+      border-color: #3b82f6;
     }
 
     .control-group {
       width: 100%;
       max-width: 480px;
       margin-bottom: 12px;
-      text-align: left;
     }
 
-    .control-group label {
-      font-size: 14px;
+    label {
+      font-size: 13px;
       color: #94a3b8;
       display: block;
       margin-bottom: 4px;
     }
 
-    select {
+    select,
+    input {
       width: 100%;
       padding: 10px 12px;
-      font-size: 16px;
+      font-size: 15px;
       border-radius: 8px;
       border: 2px solid #334155;
       background: #1e293b;
       color: #f1f5f9;
       outline: none;
+      margin-bottom: 8px;
     }
 
     .video-wrap {
@@ -75,8 +110,8 @@
     }
 
     #status {
-      margin-top: 15px;
-      font-size: 16px;
+      margin-top: 12px;
+      font-size: 15px;
       font-weight: 600;
       text-align: center;
       min-height: 24px;
@@ -84,13 +119,12 @@
 
     #result {
       margin-top: 8px;
-      font-size: 20px;
+      font-size: 18px;
       font-weight: 800;
       text-align: center;
-      min-height: 36px;
+      min-height: 32px;
       padding: 6px 16px;
       border-radius: 10px;
-      transition: all 0.2s;
     }
 
     .result-in {
@@ -113,16 +147,23 @@
       color: #d8b4fe;
     }
 
-    .log-list {
-      margin-top: 20px;
+    .btn-primary {
       width: 100%;
-      max-width: 480px;
+      padding: 12px;
+      background: #10b981;
+      color: #fff;
+      font-size: 16px;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-top: 8px;
     }
 
-    .log-list h3 {
-      font-size: 14px;
-      color: #94a3b8;
-      margin-bottom: 6px;
+    .log-list {
+      margin-top: 15px;
+      width: 100%;
+      max-width: 480px;
     }
 
     .log-item {
@@ -145,115 +186,158 @@
 </head>
 
 <body>
-  <h1>🕒 ระบบสแกนใบหน้าเข้า-ออกงานและ OT</h1>
+  <h1>🕒 ระบบสแกนใบหน้าและลงทะเบียน</h1>
 
-  <div class="control-group" style="display: flex; gap: 8px; align-items: flex-end;">
-    <div style="flex: 1;">
-      <label for="actionType">เลือกรายการลงเวลา:</label>
-      <select id="actionType">
-        <option value="เข้างาน">เข้างานปกติ</option>
-        <option value="ออกงาน">ออกงานปกติ</option>
-        <option value="เข้าทำ OT">เข้าทำ OT</option>
-        <option value="ออก OT">ออก OT (คำนวณเงินอัตโนมัติ)</option>
-      </select>
+  <!-- ปุ่มสลับโหมด -->
+  <div class="nav-tabs">
+    <div id="tabScan" class="tab-btn active" onclick="switchTab('scan')">📷 สแกนลงเวลา</div>
+    <div id="tabAdmin" class="tab-btn" onclick="switchTab('admin')">👤 ลงทะเบียนพนักงาน</div>
+  </div>
+
+  <!-- โหมดที่ 1: สแกนเข้า-ออกงาน -->
+  <div id="scanSection" style="width: 100%; max-width: 480px;">
+    <div class="control-group" style="display: flex; gap: 8px; align-items: flex-end;">
+      <div style="flex: 1;">
+        <label for="actionType">รายการลงเวลา (ปรับให้อัตโนมัติ):</label>
+        <select id="actionType">
+          <option value="เข้างาน">เข้างานปกติ</option>
+          <option value="ออกงาน">ออกงานปกติ</option>
+          <option value="เข้าทำ OT">เข้าทำ OT</option>
+          <option value="ออก OT">ออก OT (คำนวณเงิน)</option>
+        </select>
+      </div>
+      <button id="switchCamBtn"
+        style="padding: 10px 14px; font-size: 15px; border-radius: 8px; border: 2px solid #334155; background: #1e293b; color: #f1f5f9; cursor: pointer; height: 44px;">🔄
+        สลับกล้อง</button>
     </div>
-    <button id="switchCamBtn"
-      style="padding: 10px 16px; font-size: 16px; border-radius: 8px; border: 2px solid #334155; background: #1e293b; color: #f1f5f9; cursor: pointer; height: 44px; font-weight: 600;">🔄
-      สลับกล้อง</button>
+
+    <div class="video-wrap">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div id="status">กำลังเริ่มต้นระบบ...</div>
+    <div id="result"></div>
+
+    <div class="log-list">
+      <h3 style="font-size: 13px; color: #94a3b8;">รายการล่าสุด</h3>
+      <div id="logItems"></div>
+    </div>
   </div>
 
-  <div class="video-wrap">
-    <video id="video" autoplay muted playsinline></video>
-    <canvas id="overlay"></canvas>
+  <!-- โหมดที่ 2: หน้าลงทะเบียนพนักงาน (Web Admin Enrollment) -->
+  <div id="adminSection" style="width: 100%; max-width: 480px; display: none;">
+    <div style="background: #1e293b; padding: 16px; border-radius: 12px; border: 1px solid #334155;">
+      <h3 style="margin-top:0; font-size: 16px;">กรอกข้อมูลพนักงานใหม่</h3>
+      <label>รหัสพนักงาน:</label>
+      <input type="text" id="regEmpId" placeholder="เช่น 1001">
+      <label>ชื่อ-นามสกุล:</label>
+      <input type="text" id="regName" placeholder="เช่น สมชาย ใจดี">
+      <label>แผนก:</label>
+      <input type="text" id="regDept" placeholder="เช่น ไอที / บุคคล">
+
+      <div class="video-wrap" style="margin-top: 10px; height: 240px;">
+        <video id="adminVideo" autoplay muted playsinline></video>
+      </div>
+
+      <button class="btn-primary" onclick="registerEmployee()">📸 ถ่ายรูปและลงทะเบียน</button>
+      <div id="adminStatus" style="margin-top: 10px; text-align: center; font-size: 14px;"></div>
+    </div>
   </div>
 
-  <div id="status">กำลังเริ่มต้นระบบ...</div>
-  <div id="result"></div>
-
-  <div class="log-list">
-    <h3>รายการล่าสุด</h3>
-    <div id="logItems"></div>
-  </div>
-
-  <!-- เปลี่ยนสคริปต์มาใช้ @vladmandic/face-api -->
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
   <script>
-    // อัปเดต URL ของโมเดลไปยัง CDN ของ Vlad Mandic โดยตรง
     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-
     const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxYd1DDEb7QUldQ-iQhY8lxgHENwrbg1NHCFBfLBqcfnM3s_Er6lBX8H38N7p6N7AElZQ/exec';
 
     let employeesData = [];
+    let todayStatusMap = {}; // เก็บประวัติสถานะล่าสุดของพนักงานวันนี้
     let matcher = null;
     let isProcessing = false;
     let lastLoggedTime = {};
     const COOLDOWN_MS = 8000;
     let currentFacingMode = 'user';
     let hasTurnedHead = false;
+    let turnProgress = 0; // ค่าสะสมวงกลม Progress
+
+    // --- 🔊 ระบบเสียงตอบรับ (Audio & Voice Feedback) ---
+    function playBeep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 800;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      } catch (e) { }
+    }
+
+    function speak(text) {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel(); // ยกเลิกเสียงค้างก่อนหน้า
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'th-TH';
+        utterance.rate = 1.0;
+        window.speechSynthesis.speak(utterance);
+      }
+    }
 
     function setStatus(text) {
       document.getElementById('status').innerText = text;
     }
 
+    // --- 🔄 สลับหน้าจอ (Scanner / Admin) ---
+    async function switchTab(tab) {
+      document.getElementById('tabScan').className = 'tab-btn ' + (tab === 'scan' ? 'active' : '');
+      document.getElementById('tabAdmin').className = 'tab-btn ' + (tab === 'admin' ? 'active' : '');
+      document.getElementById('scanSection').style.display = tab === 'scan' ? 'block' : 'none';
+      document.getElementById('adminSection').style.display = tab === 'admin' ? 'block' : 'none';
+
+      if (tab === 'admin') {
+        startAdminCamera();
+      } else {
+        startCamera();
+      }
+    }
+
     async function init() {
       try {
-        setStatus('กำลังเปิดกล้อง...');
-        await startCamera();
+        setStatus('กำลังเปิดกล้องและโหลด AI...');
+        await Promise.all([startCamera(), loadModels(), loadEmployees()]);
 
         document.getElementById('switchCamBtn').addEventListener('click', async () => {
           currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
-          setStatus('กำลังสลับกล้อง...');
-
-          isProcessing = true;
-          hasTurnedHead = false;
-
-          try {
-            await startCamera();
-
-            const overlay = document.getElementById('overlay');
-            overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
-
-            setStatus('✅ สลับกล้องสำเร็จ — พร้อมสแกน');
-          } catch (err) {
-            setStatus('❌ สลับกล้องล้มเหลว: ' + err.message);
-          } finally {
-            isProcessing = false;
-          }
+          await startCamera();
         });
 
-        setStatus('กำลังโหลดโมเดล AI...');
-        await Promise.all([
-          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-        ]);
-
-        setStatus('กำลังโหลดข้อมูลพนักงานจาก Drive...');
-        await loadEmployees();
-
         if (matcher) {
-          setStatus('✅ พร้อมสแกน — กรุณามองกล้องและหันซ้าย/ขวาเล็กน้อยเพื่อยืนยันตัวตน');
+          setStatus('✅ พร้อมสแกน — กรุณามองกล้องและหันซ้าย/ขวาเพื่อยืนยัน');
           detectLoop();
-        } else {
-          setStatus('⚠️ กล้องพร้อมทำงาน แต่ยังไม่มีข้อมูลพนักงานเพื่อสแกนใบหน้า');
         }
       } catch (err) {
-        console.error(err);
         setStatus('❌ เกิดข้อผิดพลาด: ' + err.message);
       }
+    }
+
+    async function loadModels() {
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+      ]);
     }
 
     async function loadEmployees() {
       try {
         const response = await fetch(WEB_APP_URL + '?action=getEmployees');
-        const text = await response.text();
+        const resData = await response.json();
 
-        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
-          throw new Error('ระบบส่งค่ากลับเป็น HTML แทนพนักงาน JSON');
-        }
-
-        employeesData = JSON.parse(text);
+        employeesData = resData.employees || resData; // รองรับทั้งโครงสร้างใหม่และเก่า
+        todayStatusMap = resData.todayStatus || {};
 
         const localCacheKey = employeesData.map(e => e.id + '_' + (e.dataUrl ? e.dataUrl.length : 0)).join('|');
         const cachedData = localStorage.getItem('face_scanner_descriptors_cache');
@@ -267,68 +351,69 @@
             const descArray = item.descriptors.map(d => new Float32Array(Object.values(d)));
             labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(item.label, descArray));
           }
-          console.log('โหลดใบหน้าพนักงานทั้งหมดจากแคชในเครื่องสำเร็จ!');
         } else {
           await Promise.all(employeesData.map(async (emp) => {
             try {
               const img = await faceapi.fetchImage(emp.dataUrl);
-              const detection = await faceapi.detectSingleFace(img)
+              const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
                 .withFaceLandmarks().withFaceDescriptor();
               if (detection) {
                 labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
-              } else {
-                console.warn('ไม่สามารถตรวจจับใบหน้าจากรูปพนักงาน:', emp.name);
               }
-            } catch (e) {
-              console.warn('โหลดรูปพนักงานล้มเหลว:', emp.name, e);
-            }
+            } catch (e) { }
           }));
 
           if (labeledDescriptors.length > 0) {
-            try {
-              localStorage.setItem('face_scanner_cache_key', localCacheKey);
-              localStorage.setItem('face_scanner_descriptors_cache', JSON.stringify(labeledDescriptors));
-            } catch (cacheErr) {
-              console.warn('ไม่สามารถบันทึกแคชลง LocalStorage ได้:', cacheErr);
-            }
+            localStorage.setItem('face_scanner_cache_key', localCacheKey);
+            localStorage.setItem('face_scanner_descriptors_cache', JSON.stringify(labeledDescriptors));
           }
         }
 
         if (labeledDescriptors.length > 0) {
           matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
-          setStatus('โหลดข้อมูลพนักงานสำเร็จ (' + labeledDescriptors.length + ' คน)');
-        } else {
-          matcher = null;
-          setStatus('⚠️ ไม่พบภาพใบหน้าพนักงาน หรือสแกนหาใบหน้าในรูปไม่พบ');
         }
       } catch (err) {
-        console.error(err);
-        setStatus('⚠️ เกิดข้อผิดพลาดในการดึงข้อมูลพนักงาน: ' + err.message);
+        setStatus('⚠️ เกิดข้อผิดพลาดดึงข้อมูลพนักงาน: ' + err.message);
       }
     }
 
     async function startCamera() {
       const video = document.getElementById('video');
-      const overlay = document.getElementById('overlay');
-
-      if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
-      }
+      if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } }
       });
       video.srcObject = stream;
+      video.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
+      document.getElementById('overlay').style.transform = video.style.transform;
+    }
 
-      const mirrorTransform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
-      video.style.transform = mirrorTransform;
-      overlay.style.transform = mirrorTransform;
+    async function startAdminCamera() {
+      const adminVideo = document.getElementById('adminVideo');
+      if (adminVideo.srcObject) adminVideo.srcObject.getTracks().forEach(t => t.stop());
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      adminVideo.srcObject = stream;
+    }
 
-      return new Promise(resolve => {
-        video.onloadedmetadata = () => {
-          video.play().then(resolve);
-        };
-      });
+    // --- 🤖 ระบบสลับรายการอัตโนมัติ (Smart Auto-Select: Method 2) ---
+    function autoSelectActionForEmployee(empId) {
+      const status = todayStatusMap[empId] || {};
+      const actionSelect = document.getElementById('actionType');
+
+      if (!status.lastNormal) {
+        actionSelect.value = 'เข้างาน';
+      } else if (status.lastNormal === 'เข้างาน') {
+        actionSelect.value = 'ออกงาน';
+      } else if (status.lastNormal === 'ออกงาน') {
+        if (!status.lastOT) {
+          actionSelect.value = 'เข้าทำ OT';
+        } else if (status.lastOT === 'เข้าทำ OT') {
+          actionSelect.value = 'ออก OT';
+        } else {
+          actionSelect.value = 'เข้างาน';
+        }
+      }
     }
 
     function addLogItem(name, type, time) {
@@ -340,12 +425,31 @@
       while (container.children.length > 8) container.removeChild(container.lastChild);
     }
 
+    // --- 🎯 วาดวงกลม Progress Ring ล้อมรอบหน้าขณะหัน ---
+    function drawProgressCircle(ctx, box, progress) {
+      const centerX = box.x + box.width / 2;
+      const centerY = box.y + box.height / 2;
+      const radius = Math.max(box.width, box.height) / 2 + 15;
+
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, -Math.PI / 2, (-Math.PI / 2) + (2 * Math.PI * progress));
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+    }
+
     function detectLoop() {
       const video = document.getElementById('video');
       const overlay = document.getElementById('overlay');
 
       setInterval(async () => {
-        if (isProcessing || !matcher || video.paused || video.ended || video.readyState < 3) return;
+        if (isProcessing || !matcher || video.paused || video.readyState < 3) return;
         isProcessing = true;
 
         try {
@@ -355,7 +459,8 @@
             .withFaceDescriptor();
 
           const dims = faceapi.matchDimensions(overlay, video, true);
-          overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+          const ctx = overlay.getContext('2d');
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
 
           if (detection) {
             const match = matcher.findBestMatch(detection.descriptor);
@@ -365,113 +470,153 @@
             const nose = landmarks[30];
             const leftJaw = landmarks[2];
             const rightJaw = landmarks[14];
-
             const distLeft = Math.abs(nose.x - leftJaw.x);
             const distRight = Math.abs(rightJaw.x - nose.x);
             const yawRatio = distLeft / (distLeft + distRight);
-
-            let boxLabel = 'ไม่พบพนักงานในระบบ';
-            if (match.label !== 'unknown') {
-              const empObj = employeesData.find(e => e.id === match.label);
-              const name = empObj ? empObj.name : match.label;
-              const matchPercent = ((1 - match.distance) * 100).toFixed(0);
-              boxLabel = `${name} (${matchPercent}%)`;
-              if (!hasTurnedHead) {
-                boxLabel += ' - 🔒 หันซ้าย/ขวาเพื่อบันทึก';
-              } else {
-                boxLabel += ' - 🔓 ยืนยันตัวตนแล้ว';
-              }
-            }
-
-            const box = resized.detection.box;
-            const drawBox = new faceapi.draw.DrawBox(box, {
-              label: boxLabel,
-              boxColor: match.label !== 'unknown' ? '#10b981' : '#ef4444'
-            });
-            drawBox.draw(overlay);
 
             if (match.label !== 'unknown') {
               const empId = match.label;
               const empObj = employeesData.find(e => e.id === match.label);
               const empName = empObj ? empObj.name : empId;
-              const empDept = empObj ? empObj.department : 'ทั่วไป';
+
+              // เรียกใช้ Smart Auto-Select เมื่อจำหน้าได้
+              autoSelectActionForEmployee(empId);
+
+              // คำนวณการหันหน้าและอัปเดต Progress
+              if (yawRatio < 0.35 || yawRatio > 0.65) {
+                turnProgress = Math.min(1.0, turnProgress + 0.35);
+                if (turnProgress >= 1.0) hasTurnedHead = true;
+              } else {
+                turnProgress = Math.max(0.1, turnProgress - 0.05);
+              }
+
+              // วาดกรอบและวงกลม Progress
+              const box = resized.detection.box;
+              drawProgressCircle(ctx, box, turnProgress);
+
+              const drawBox = new faceapi.draw.DrawBox(box, {
+                label: `${empName} (${((1 - match.distance) * 100).toFixed(0)}%) ${hasTurnedHead ? '🔓' : '🔒 หันหน้าเพื่อยืนยัน'}`,
+                boxColor: '#10b981'
+              });
+              drawBox.draw(overlay);
 
               const now = Date.now();
               if (!lastLoggedTime[empId] || now - lastLoggedTime[empId] > COOLDOWN_MS) {
-
                 if (!hasTurnedHead) {
-                  setStatus('🔒 ตรวจพบคุณ ' + empName + ' — กรุณาหันหน้าไปทางซ้ายหรือขวาเล็กน้อยเพื่อยืนยันตัวตน...');
-
-                  if (yawRatio < 0.33 || yawRatio > 0.67) {
-                    hasTurnedHead = true;
-                    setStatus('🔓 ยืนยันตัวตนสำเร็จ! กำลังบันทึกเวลา...');
-                  }
+                  setStatus('🔒 ตรวจพบคุณ ' + empName + ' — กรุณาหันหน้าไปทางซ้าย/ขวาเล็กน้อย...');
                   return;
                 }
 
                 lastLoggedTime[empId] = now;
                 hasTurnedHead = false;
+                turnProgress = 0;
 
                 const actionType = document.getElementById('actionType').value;
                 setStatus('พบใบหน้า: ' + empName + ' (' + actionType + ') — กำลังบันทึก...');
 
+                // แคปภาพส่งเซิร์ฟเวอร์
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth || 640;
                 canvas.height = video.videoHeight || 480;
-                const ctx = canvas.getContext('2d');
-
-                if (currentFacingMode === 'user') {
-                  ctx.translate(canvas.width, 0);
-                  ctx.scale(-1, 1);
-                }
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                if (currentFacingMode === 'user') {
-                  ctx.setTransform(1, 0, 0, 1, 0, 0);
-                }
+                const cCtx = canvas.getContext('2d');
+                if (currentFacingMode === 'user') { cCtx.translate(canvas.width, 0); cCtx.scale(-1, 1); }
+                cCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 const snapshotBase64 = canvas.toDataURL('image/jpeg', 0.8);
 
-                try {
-                  const res = await fetch(WEB_APP_URL, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                      empId: empId,
-                      name: empName,
-                      department: empDept,
-                      actionType: actionType,
-                      confidence: (1 - match.distance).toFixed(2),
-                      snapshot: snapshotBase64
-                    })
-                  });
-                  const data = await res.json();
+                const res = await fetch(WEB_APP_URL, {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    empId: empId,
+                    name: empName,
+                    department: empObj ? empObj.department : 'ทั่วไป',
+                    actionType: actionType,
+                    confidence: (1 - match.distance).toFixed(2),
+                    snapshot: snapshotBase64
+                  })
+                });
+                const data = await res.json();
 
-                  if (!data.success) {
-                    throw new Error(data.error || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-                  }
+                if (data.success) {
+                  // 🔊 เล่นเสียงต๊อด และเสียงพูดตอบรับ
+                  playBeep();
+                  speak(`บันทึกเวลา${actionType}สำเร็จแล้วค่ะ คุณ${empName}`);
+
+                  // อัปเดต Map สถานะในเครื่องทันที
+                  if (!todayStatusMap[empId]) todayStatusMap[empId] = {};
+                  if (actionType === 'เข้างาน' || actionType === 'ออกงาน') todayStatusMap[empId].lastNormal = actionType;
+                  if (actionType === 'เข้าทำ OT' || actionType === 'ออก OT') todayStatusMap[empId].lastOT = actionType;
 
                   const resultEl = document.getElementById('result');
-                  if (actionType === 'เข้างาน') resultEl.className = 'result-in';
-                  else if (actionType === 'ออกงาน') resultEl.className = 'result-out';
-                  else if (actionType === 'เข้าทำ OT') resultEl.className = 'result-ot-in';
-                  else if (actionType === 'ออก OT') resultEl.className = 'result-ot-out';
-
-                  resultEl.innerText = `${empName} — ${actionType} (${data.displayTime})${data.otTotal ? ' [OT: ' + data.otTotal + ' ฿]' : ''}`;
+                  resultEl.className = actionType.includes('เข้า') ? 'result-in' : 'result-out';
+                  resultEl.innerText = `${empName} — ${actionType} (${data.displayTime})`;
                   addLogItem(empName, actionType, data.displayTime);
-                  setStatus('✅ พร้อมสแกน — กรุณามองกล้องให้เห็นหน้าชัดเจน');
-                } catch (e) {
-                  setStatus('❌ บันทึกไม่สำเร็จ: ' + e.message);
+                  setStatus('✅ บันทึกสำเร็จเรียบร้อย');
+                } else {
+                  speak('บันทึกไม่สำเร็จ ' + data.error);
+                  setStatus('❌ ' + data.error);
                 }
               }
+            } else {
+              turnProgress = 0;
+              hasTurnedHead = false;
             }
-          } else {
-            hasTurnedHead = false;
           }
-        } catch (loopErr) {
-          console.warn("สแกนภาพสะดุดชั่วคราวขณะสลับกล้อง:", loopErr);
+        } catch (err) {
         } finally {
           isProcessing = false;
         }
       }, 300);
+    }
+
+    // --- 👤 ฟังก์ชันลงทะเบียนพนักงานใหม่ (Web Admin Enrollment) ---
+    async function registerEmployee() {
+      const empId = document.getElementById('regEmpId').value.trim();
+      const name = document.getElementById('regName').value.trim();
+      const dept = document.getElementById('regDept').value.trim() || 'ทั่วไป';
+      const statusEl = document.getElementById('adminStatus');
+
+      if (!empId || !name) {
+        alert('กรุณากรอกรหัสพนักงานและชื่อ-นามสกุลให้ครบถ้วน');
+        return;
+      }
+
+      statusEl.innerText = '⏳ กำลังถ่ายรูปและอัปโหลดเข้า Google Drive...';
+
+      const adminVideo = document.getElementById('adminVideo');
+      const canvas = document.createElement('canvas');
+      canvas.width = 400; canvas.height = 400;
+      canvas.getContext('2d').drawImage(adminVideo, 0, 0, 400, 400);
+      const photoBase64 = canvas.toDataURL('image/jpeg', 0.85);
+
+      try {
+        const res = await fetch(WEB_APP_URL, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'registerEmployee',
+            empId: empId,
+            name: name,
+            department: dept,
+            photoBase64: photoBase64
+          })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          playBeep();
+          speak(`ลงทะเบียนคุณ ${name} สำเร็จแล้วค่ะ`);
+          statusEl.innerText = '✅ ลงทะเบียนสำเร็จ! กำลังรีโหลดข้อมูลพนักงาน...';
+          document.getElementById('regEmpId').value = '';
+          document.getElementById('regName').value = '';
+
+          localStorage.removeItem('face_scanner_descriptors_cache'); // ลบแคชเพื่อให้โหลดพนักงานใหม่
+          await loadEmployees();
+          statusEl.innerText = '✅ พร้อมใช้งานพนักงานใหม่เรียบร้อยแล้ว';
+        } else {
+          statusEl.innerText = '❌ เกิดข้อผิดพลาด: ' + data.message;
+        }
+      } catch (err) {
+        statusEl.innerText = '❌ ลงทะเบียนล้มเหลว: ' + err.message;
+      }
     }
 
     init();
