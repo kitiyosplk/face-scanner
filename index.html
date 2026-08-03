@@ -157,7 +157,9 @@
         <option value="ออก OT">ออก OT (คำนวณเงินอัตโนมัติ)</option>
       </select>
     </div>
-    <button id="switchCamBtn" style="padding: 10px 16px; font-size: 16px; border-radius: 8px; border: 2px solid #334155; background: #1e293b; color: #f1f5f9; cursor: pointer; height: 44px; font-weight: 600;">🔄 สลับกล้อง</button>
+    <button id="switchCamBtn"
+      style="padding: 10px 16px; font-size: 16px; border-radius: 8px; border: 2px solid #334155; background: #1e293b; color: #f1f5f9; cursor: pointer; height: 44px; font-weight: 600;">🔄
+      สลับกล้อง</button>
   </div>
 
   <div class="video-wrap">
@@ -201,16 +203,25 @@
         document.getElementById('switchCamBtn').addEventListener('click', async () => {
           currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
           setStatus('กำลังสลับกล้อง...');
+
+          isProcessing = true;
+          hasTurnedHead = false;
+
           try {
             await startCamera();
+
+            const overlay = document.getElementById('overlay');
+            overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+
             setStatus('✅ สลับกล้องสำเร็จ — พร้อมสแกน');
           } catch (err) {
             setStatus('❌ สลับกล้องล้มเหลว: ' + err.message);
+          } finally {
+            isProcessing = false;
           }
         });
 
         setStatus('กำลังโหลดโมเดล AI...');
-        // โหลดโมเดลพร้อมกันแบบขนาน (Parallel) เพื่อความรวดเร็ว
         await Promise.all([
           faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
           faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
@@ -237,14 +248,13 @@
       try {
         const response = await fetch(WEB_APP_URL + '?action=getEmployees');
         const text = await response.text();
-        
+
         if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
           throw new Error('ระบบส่งค่ากลับเป็น HTML แทนพนักงาน JSON');
         }
 
         employeesData = JSON.parse(text);
 
-        // คำนวณรหัสแคชในเครื่อง (ถ้าข้อมูลไฟล์เดิม รูปขนาดเดิม จะถือว่าเป็นข้อมูลชุดเดิม)
         const localCacheKey = employeesData.map(e => e.id + '_' + (e.dataUrl ? e.dataUrl.length : 0)).join('|');
         const cachedData = localStorage.getItem('face_scanner_descriptors_cache');
         const cachedKey = localStorage.getItem('face_scanner_cache_key');
@@ -252,7 +262,6 @@
         const labeledDescriptors = [];
 
         if (cachedData && cachedKey === localCacheKey) {
-          // โหลดจาก Local Cache ทันที บายพาสการประมวลผลรูปใหม่ทำให้โหลดเสร็จใน 0.1 วินาที!
           const parsed = JSON.parse(cachedData);
           for (const item of parsed) {
             const descArray = item.descriptors.map(d => new Float32Array(Object.values(d)));
@@ -260,7 +269,6 @@
           }
           console.log('โหลดใบหน้าพนักงานทั้งหมดจากแคชในเครื่องสำเร็จ!');
         } else {
-          // โหลดรูปและสแกนใบหน้าพนักงานแบบขนาน (Parallel) เพื่อไม่ให้ล่าช้า
           await Promise.all(employeesData.map(async (emp) => {
             try {
               const img = await faceapi.fetchImage(emp.dataUrl);
@@ -276,7 +284,6 @@
             }
           }));
 
-          // บันทึกลงแคชเพื่อใช้งานในครั้งถัดไป
           if (labeledDescriptors.length > 0) {
             try {
               localStorage.setItem('face_scanner_cache_key', localCacheKey);
@@ -313,11 +320,14 @@
       });
       video.srcObject = stream;
 
-      // จัดการ Mirror ซ้ายขวา: กล้องหน้าให้ Mirror, กล้องหลังไม่ต้อง Mirror
       video.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
       overlay.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
 
-      return new Promise(resolve => (video.onloadedmetadata = resolve));
+      return new Promise(resolve => {
+        video.onloadedmetadata = () => {
+          video.play().then(resolve);
+        };
+      });
     }
 
     function addLogItem(name, type, time) {
@@ -334,133 +344,131 @@
       const overlay = document.getElementById('overlay');
 
       setInterval(async () => {
-        if (isProcessing || !matcher) return;
+        if (isProcessing || !matcher || video.paused || video.ended || video.readyState < 3) return;
         isProcessing = true;
 
-        // ใช้ TinyFaceDetector ในกล้องสดเพื่อการประมวลผลที่ลื่นไหลระดับ 300ms (ไม่มีกระตุก)
-        const detection = await faceapi
-          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
-          .withFaceLandmarks()
-          .withFaceDescriptor();
+        try {
+          const detection = await faceapi
+            .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
+            .withFaceLandmarks()
+            .withFaceDescriptor();
 
-        const dims = faceapi.matchDimensions(overlay, video, true);
-        overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+          const dims = faceapi.matchDimensions(overlay, video, true);
+          overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
 
-        if (detection) {
-          const match = matcher.findBestMatch(detection.descriptor);
-          const resized = faceapi.resizeResults(detection, dims);
+          if (detection) {
+            const match = matcher.findBestMatch(detection.descriptor);
+            const resized = faceapi.resizeResults(detection, dims);
 
-          // คำนวณอัตราส่วนการหันหัว ซ้าย-ขวา (Liveness Head Turn Detection)
-          const landmarks = resized.landmarks.positions;
-          const nose = landmarks[30];      // ปลายจมูก
-          const leftJaw = landmarks[2];    // ขอบกรามฝั่งซ้าย
-          const rightJaw = landmarks[14];  // ขอบกรามฝั่งขวา
+            const landmarks = resized.landmarks.positions;
+            const nose = landmarks[30];
+            const leftJaw = landmarks[2];
+            const rightJaw = landmarks[14];
 
-          const distLeft = Math.abs(nose.x - leftJaw.x);
-          const distRight = Math.abs(rightJaw.x - nose.x);
-          const yawRatio = distLeft / (distLeft + distRight);
+            const distLeft = Math.abs(nose.x - leftJaw.x);
+            const distRight = Math.abs(rightJaw.x - nose.x);
+            const yawRatio = distLeft / (distLeft + distRight);
 
-          // วาดกรอบตรวจจับใบหน้าพร้อมแสดงชื่อผู้ใช้และเปอร์เซ็นต์ความมั่นใจ
-          let boxLabel = 'ไม่พบพนักงานในระบบ';
-          if (match.label !== 'unknown') {
-            const empObj = employeesData.find(e => e.id === match.label);
-            const name = empObj ? empObj.name : match.label;
-            const matchPercent = ((1 - match.distance) * 100).toFixed(0);
-            boxLabel = `${name} (${matchPercent}%)`;
-            if (!hasTurnedHead) {
-              boxLabel += ' - 🔒 หันซ้าย/ขวาเพื่อบันทึก';
-            } else {
-              boxLabel += ' - 🔓 ยืนยันตัวตนแล้ว';
-            }
-          }
-
-          const box = resized.detection.box;
-          const drawBox = new faceapi.draw.DrawBox(box, { 
-            label: boxLabel, 
-            boxColor: match.label !== 'unknown' ? '#10b981' : '#ef4444' 
-          });
-          drawBox.draw(overlay);
-
-          if (match.label !== 'unknown') {
-            const empId = match.label;
-            const empObj = employeesData.find(e => e.id === empId);
-            const empName = empObj ? empObj.name : empId;
-            const empDept = empObj ? empObj.department : 'ทั่วไป';
-
-            const now = Date.now();
-            if (!lastLoggedTime[empId] || now - lastLoggedTime[empId] > COOLDOWN_MS) {
-              
-              // ป้องกันการใช้รูปถ่าย: บังคับให้มีการหันหัวไปด้านข้างเล็กน้อย (ปกติอัตราส่วนจะอยู่ราวๆ 0.45 - 0.55)
+            let boxLabel = 'ไม่พบพนักงานในระบบ';
+            if (match.label !== 'unknown') {
+              const empObj = employeesData.find(e => e.id === match.label);
+              const name = empObj ? empObj.name : match.label;
+              const matchPercent = ((1 - match.distance) * 100).toFixed(0);
+              boxLabel = `${name} (${matchPercent}%)`;
               if (!hasTurnedHead) {
-                setStatus('🔒 ตรวจพบคุณ ' + empName + ' — กรุณาหันหน้าไปทางซ้ายหรือขวาเล็กน้อยเพื่อยืนยันตัวตน...');
-                if (yawRatio < 0.33 || yawRatio > 0.67) {
-                  hasTurnedHead = true;
-                  setStatus('🔓 ยืนยันตัวตนสำเร็จ! กำลังบันทึกเวลา...');
-                }
-                isProcessing = false;
-                return;
-              }
-
-              lastLoggedTime[empId] = now;
-              hasTurnedHead = false; // รีเซ็ตสำหรับรอบถัดไป
-
-              const actionType = document.getElementById('actionType').value;
-              setStatus('พบใบหน้า: ' + empName + ' (' + actionType + ') — กำลังบันทึก...');
-
-              // ถ่ายภาพ Snapshot เป็นหลักฐาน
-              const canvas = document.createElement('canvas');
-              canvas.width = video.videoWidth || 640;
-              canvas.height = video.videoHeight || 480;
-              const ctx = canvas.getContext('2d');
-              
-              if (currentFacingMode === 'user') {
-                ctx.translate(canvas.width, 0);
-                ctx.scale(-1, 1);
-              }
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              
-              if (currentFacingMode === 'user') {
-                ctx.setTransform(1, 0, 0, 1, 0, 0);
-              }
-              const snapshotBase64 = canvas.toDataURL('image/jpeg', 0.8);
-
-              try {
-                const res = await fetch(WEB_APP_URL, {
-                  method: 'POST',
-                  body: JSON.stringify({
-                    empId: empId,
-                    name: empName,
-                    department: empDept,
-                    actionType: actionType,
-                    confidence: (1 - match.distance).toFixed(2),
-                    snapshot: snapshotBase64
-                  })
-                });
-                const data = await res.json();
-
-                if (!data.success) {
-                  throw new Error(data.error || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-                }
-
-                const resultEl = document.getElementById('result');
-                if (actionType === 'เข้างาน') resultEl.className = 'result-in';
-                else if (actionType === 'ออกงาน') resultEl.className = 'result-out';
-                else if (actionType === 'เข้าทำ OT') resultEl.className = 'result-ot-in';
-                else if (actionType === 'ออก OT') resultEl.className = 'result-ot-out';
-
-                resultEl.innerText = `${empName} — ${actionType} (${data.displayTime})${data.otTotal ? ' [OT: ' + data.otTotal + ' ฿]' : ''}`;
-                addLogItem(empName, actionType, data.displayTime);
-                setStatus('✅ พร้อมสแกน — กรุณามองกล้องให้เห็นหน้าชัดเจน');
-              } catch (e) {
-                setStatus('❌ บันทึกไม่สำเร็จ: ' + e.message);
+                boxLabel += ' - 🔒 หันซ้าย/ขวาเพื่อบันทึก';
+              } else {
+                boxLabel += ' - 🔓 ยืนยันตัวตนแล้ว';
               }
             }
-          }
-        } else {
-          hasTurnedHead = false;
-        }
 
-        isProcessing = false;
+            const box = resized.detection.box;
+            const drawBox = new faceapi.draw.DrawBox(box, {
+              label: boxLabel,
+              boxColor: match.label !== 'unknown' ? '#10b981' : '#ef4444'
+            });
+            drawBox.draw(overlay);
+
+            if (match.label !== 'unknown') {
+              const empId = match.label;
+              const empObj = employeesData.find(e => e.id === empId);
+              const empName = empObj ? empObj.name : empId;
+              const empDept = empObj ? empObj.department : 'ทั่วไป';
+
+              const now = Date.now();
+              if (!lastLoggedTime[empId] || now - lastLoggedTime[empId] > COOLDOWN_MS) {
+
+                if (!hasTurnedHead) {
+                  setStatus('🔒 ตรวจพบคุณ ' + empName + ' — กรุณาหันหน้าไปทางซ้ายหรือขวาเล็กน้อยเพื่อยืนยันตัวตน...');
+                  if (yawRatio < 0.33 || yawRatio > 0.67) {
+                    hasTurnedHead = true;
+                    setStatus('🔓 ยืนยันตัวตนสำเร็จ! กำลังบันทึกเวลา...');
+                  }
+                  return;
+                }
+
+                lastLoggedTime[empId] = now;
+                hasTurnedHead = false;
+
+                const actionType = document.getElementById('actionType').value;
+                setStatus('พบใบหน้า: ' + empName + ' (' + actionType + ') — กำลังบันทึก...');
+
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+
+                if (currentFacingMode === 'user') {
+                  ctx.translate(canvas.width, 0);
+                  ctx.scale(-1, 1);
+                }
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                if (currentFacingMode === 'user') {
+                  ctx.setTransform(1, 0, 0, 1, 0, 0);
+                }
+                const snapshotBase64 = canvas.toDataURL('image/jpeg', 0.8);
+
+                try {
+                  const res = await fetch(WEB_APP_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      empId: empId,
+                      name: empName,
+                      department: empDept,
+                      actionType: actionType,
+                      confidence: (1 - match.distance).toFixed(2),
+                      snapshot: snapshotBase64
+                    })
+                  });
+                  const data = await res.json();
+
+                  if (!data.success) {
+                    throw new Error(data.error || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+                  }
+
+                  const resultEl = document.getElementById('result');
+                  if (actionType === 'เข้างาน') resultEl.className = 'result-in';
+                  else if (actionType === 'ออกงาน') resultEl.className = 'result-out';
+                  else if (actionType === 'เข้าทำ OT') resultEl.className = 'result-ot-in';
+                  else if (actionType === 'ออก OT') resultEl.className = 'result-ot-out';
+
+                  resultEl.innerText = `${empName} — ${actionType} (${data.displayTime})${data.otTotal ? ' [OT: ' + data.otTotal + ' ฿]' : ''}`;
+                  addLogItem(empName, actionType, data.displayTime);
+                  setStatus('✅ พร้อมสแกน — กรุณามองกล้องให้เห็นหน้าชัดเจน');
+                } catch (e) {
+                  setStatus('❌ บันทึกไม่สำเร็จ: ' + e.message);
+                }
+              }
+            }
+          } else {
+            hasTurnedHead = false;
+          }
+        } catch (loopErr) {
+          console.warn("สแกนภาพสะดุดชั่วคราวขณะสลับกล้อง:", loopErr);
+        } finally {
+          isProcessing = false;
+        }
       }, 300);
     }
 
