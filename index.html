@@ -318,19 +318,17 @@
       } catch (e) { }
     }
 
-    // ⚡ 1. ปรับเสียงพูดให้กระชับ รวดเร็วขึ้น (Rate: 1.3)
     function speak(text) {
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'th-TH';
-        utterance.rate = 1.24;
+        utterance.rate = 1.3;
         utterance.pitch = 1.0;
         window.speechSynthesis.speak(utterance);
       }
     }
 
-    // ⚡ 2. ปรับการโหลดเริ่มต้น เปิดกล้องทันที ไม่ค้างรอ AI
     async function init() {
       try {
         setStatus('🎥 กำลังเปิดกล้อง...');
@@ -366,7 +364,6 @@
       ]);
     }
 
-    // ⚡ 3. ดึงรูปพนักงานและประมวลผลเร็วขึ้น
     async function loadEmployees() {
       try {
         const response = await fetch(WEB_APP_URL + '?action=getEmployees');
@@ -392,7 +389,7 @@
         }));
 
         if (labeledDescriptors.length > 0) {
-          // 🔒 ปรับตรงนี้: ใช้ 0.42 เพื่อความปลอดภัยสูงสุด คนละหน้าจะไม่มีทางสแกนติด
+          // 🔒 ปรับระดับความปลอดภัยสูงขึ้นเป็น 0.42 ป้องกันคนอื่นสแกนแทน
           matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.42);
         }
       } catch (err) {
@@ -504,7 +501,6 @@
       ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 6; ctx.stroke();
     }
 
-    // ⚡ 4. ปรับการสแกนใบหน้า ให้ตรวจจับเร็ว ไว และสแกนง่าย
     function detectLoop() {
       const video = document.getElementById('video');
       const overlay = document.getElementById('overlay');
@@ -516,11 +512,8 @@
         try {
           const detection = await faceapi.detectSingleFace(
             video,
-            // 🔒 ปรับตรงนี้: inputSize: 320 และ scoreThreshold: 0.50
             new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.50 })
           ).withFaceLandmarks().withFaceDescriptor();
-
-          // ... (โค้ดส่วนอื่นคงเดิม) ...
 
           const dims = faceapi.matchDimensions(overlay, video, true);
           const ctx = overlay.getContext('2d');
@@ -541,7 +534,6 @@
 
               const actionType = autoSelectActionForEmployee(empId);
 
-              // 🚀 ปรับมุมเอียงหน้าเล็กน้อยก็ผ่าน และบวกเกจครั้งละ 0.5 ให้ผ่านไวขึ้น
               if (yawRatio < 0.42 || yawRatio > 0.58) {
                 turnProgress = Math.min(1.0, turnProgress + 0.5);
                 if (turnProgress >= 1.0) hasTurnedHead = true;
@@ -604,13 +596,24 @@
                   setStatus('❌ ' + data.error);
                 }
               }
-            } else { turnProgress = 0; hasTurnedHead = false; }
+            } else {
+              // ❌ แจ้งเตือนกรณีไม่พบข้อมูลบุคคลนี้ในระบบ
+              turnProgress = 0;
+              hasTurnedHead = false;
+
+              const box = resized.detection.box;
+              new faceapi.draw.DrawBox(box, {
+                label: '❌ ไม่พบข้อมูลบุคคลนี้ในระบบ',
+                boxColor: '#ef4444'
+              }).draw(overlay);
+
+              setStatus('⚠️ ไม่พบข้อมูลบุคคลนี้ในระบบ');
+            }
           }
         } catch (err) { } finally { isProcessing = false; }
-      }, 250); // สแกนถี่ทุกๆ 250ms
+      }, 250);
     }
 
-    // เริ่มต้นทำงาน
     init();
   </script>
 </body>
