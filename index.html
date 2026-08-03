@@ -389,7 +389,6 @@
         }));
 
         if (labeledDescriptors.length > 0) {
-          // 🔒 ปรับระดับความปลอดภัยสูงขึ้นเป็น 0.42 ป้องกันคนอื่นสแกนแทน
           matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.42);
         }
       } catch (err) {
@@ -399,13 +398,17 @@
 
     async function startCamera() {
       const video = document.getElementById('video');
+      const overlay = document.getElementById('overlay');
       if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } }
       });
       video.srcObject = stream;
+
+      // 🎯 กลับด้านภาพกล้องวิดีโอ (สำหรับกล้องหน้า)
       video.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
-      document.getElementById('overlay').style.transform = video.style.transform;
+      // 🎯 Overlay Canvas จะไม่ใช้ scaleX(-1) เพื่อให้ตัวหนังสือแสดงผลอ่านปกติ ไม่กลับด้าน
+      overlay.style.transform = 'none';
     }
 
     function autoSelectActionForEmployee(empId) {
@@ -522,6 +525,19 @@
           if (detection) {
             const match = matcher.findBestMatch(detection.descriptor);
             const resized = faceapi.resizeResults(detection, dims);
+
+            // 🎯 ปรับตำแหน่งกรอบให้ตรงกับวิดีโอที่กลับด้าน โดยที่ตัวหนังสือไม่กลับด้าน
+            let displayBox = resized.detection.box;
+            if (currentFacingMode === 'user') {
+              const flippedX = dims.width - (displayBox.x + displayBox.width);
+              displayBox = new faceapi.Box({
+                x: flippedX,
+                y: displayBox.y,
+                width: displayBox.width,
+                height: displayBox.height
+              });
+            }
+
             const landmarks = resized.landmarks.positions;
             const distLeft = Math.abs(landmarks[30].x - landmarks[2].x);
             const distRight = Math.abs(landmarks[14].x - landmarks[30].x);
@@ -541,9 +557,8 @@
                 turnProgress = Math.max(0.1, turnProgress - 0.05);
               }
 
-              const box = resized.detection.box;
-              drawProgressCircle(ctx, box, turnProgress);
-              new faceapi.draw.DrawBox(box, {
+              drawProgressCircle(ctx, displayBox, turnProgress);
+              new faceapi.draw.DrawBox(displayBox, {
                 label: `${empName} (${((1 - match.distance) * 100).toFixed(0)}%) ${hasTurnedHead ? '🔓' : '🔒 หันหน้าเล็กน้อย'}`,
                 boxColor: '#10b981'
               }).draw(overlay);
@@ -559,19 +574,14 @@
                 hasTurnedHead = false; turnProgress = 0;
                 setStatus('พบใบหน้า: ' + empName + ' (' + actionType + ') — กำลังบันทึก...');
 
-                const canvas = document.createElement('canvas');
-                canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480;
-                const cCtx = canvas.getContext('2d');
-                if (currentFacingMode === 'user') { cCtx.translate(canvas.width, 0); cCtx.scale(-1, 1); }
-                cCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                 const res = await fetch(WEB_APP_URL, {
                   method: 'POST',
                   body: JSON.stringify({
-                    empId: empId, name: empName,
+                    empId: empId,
+                    name: empName,
                     department: empObj ? empObj.department : 'ทั่วไป',
-                    actionType: actionType, confidence: (1 - match.distance).toFixed(2),
-                    snapshot: canvas.toDataURL('image/jpeg', 0.8)
+                    actionType: actionType,
+                    confidence: (1 - match.distance).toFixed(2)
                   })
                 });
                 const data = await res.json();
@@ -597,12 +607,10 @@
                 }
               }
             } else {
-              // ❌ แจ้งเตือนกรณีไม่พบข้อมูลบุคคลนี้ในระบบ
               turnProgress = 0;
               hasTurnedHead = false;
 
-              const box = resized.detection.box;
-              new faceapi.draw.DrawBox(box, {
+              new faceapi.draw.DrawBox(displayBox, {
                 label: '❌ ไม่พบข้อมูลบุคคลนี้ในระบบ',
                 boxColor: '#ef4444'
               }).draw(overlay);
