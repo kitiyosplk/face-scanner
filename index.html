@@ -112,7 +112,6 @@
       object-fit: cover;
     }
 
-    /* 💡 Quick Action Pop-up Overlay (ข้อ 3) */
     .quick-popup {
       position: absolute;
       top: 50%;
@@ -198,7 +197,6 @@
       font-size: 13px;
     }
 
-    /* Modal ปรับเปลี่ยนรายการด้วยมือ */
     .modal {
       position: fixed;
       top: 0;
@@ -236,7 +234,6 @@
 <body>
   <h1>🕒 ระบบสแกนใบหน้าลงเวลา</h1>
 
-  <!-- 💡 ข้อ 1: ป้ายแสดงสถานะ (แทนการใช้ Dropdown แบบเดิม) -->
   <div class="control-card">
     <div class="status-badge-container">
       <span class="badge-label">รายการที่จะบันทึก (เลือกให้อัตโนมัติ):</span>
@@ -252,7 +249,6 @@
     <video id="video" autoplay muted playsinline></video>
     <canvas id="overlay"></canvas>
 
-    <!-- 💡 ข้อ 3: Quick Action Pop-up แสดง 3 วินาทีเมื่อสแกนติด -->
     <div id="quickPopup" class="quick-popup">
       <h2>🎉 บันทึกเวลาสำเร็จ!</h2>
       <p id="popupName" style="font-size: 16px; font-weight: bold;"></p>
@@ -272,7 +268,6 @@
     <div id="logItems"></div>
   </div>
 
-  <!-- Modal สำหรับเลือกเปลี่ยนรายการด้วยมือ -->
   <div id="overrideModal" class="modal">
     <div class="modal-card">
       <h3 style="margin-top:0;">เปลี่ยนรายการลงเวลา</h3>
@@ -307,6 +302,10 @@
     let manualOverrideAction = null;
     let popupTimer = null;
 
+    function setStatus(text) {
+      document.getElementById('status').innerText = text;
+    }
+
     function playBeep() {
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -319,33 +318,44 @@
       } catch (e) { }
     }
 
-    // 💡 ข้อ 5: เสียงพูดตอบรับแบบคมชัด
+    // ⚡ 1. ปรับเสียงพูดให้กระชับ รวดเร็วขึ้น (Rate: 1.3)
     function speak(text) {
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'th-TH'; utterance.rate = 1.0;
+        utterance.lang = 'th-TH';
+        utterance.rate = 1.3;
+        utterance.pitch = 1.0;
         window.speechSynthesis.speak(utterance);
       }
     }
 
-    function setStatus(text) { document.getElementById('status').innerText = text; }
-
+    // ⚡ 2. ปรับการโหลดเริ่มต้น เปิดกล้องทันที ไม่ค้างรอ AI
     async function init() {
       try {
-        setStatus('กำลังเปิดกล้องและโหลด AI...');
-        await Promise.all([startCamera(), loadModels(), loadEmployees()]);
+        setStatus('🎥 กำลังเปิดกล้อง...');
+        await startCamera();
 
         document.getElementById('switchCamBtn').addEventListener('click', async () => {
           currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
           await startCamera();
         });
 
+        setStatus('⏳ กำลังโหลด AI โมเดล...');
+        await loadModels();
+
+        setStatus('⏳ กำลังเตรียมข้อมูลพนักงาน...');
+        await loadEmployees();
+
         if (matcher) {
-          setStatus('✅ พร้อมสแกน — กรุณามองกล้องและหันหน้าเล็กน้อยเพื่อยืนยัน');
+          setStatus('✅ พร้อมสแกน — กรุณามองกล้องและเอียงหน้าเล็กน้อย');
           detectLoop();
+        } else {
+          setStatus('⚠️ ไม่พบข้อมูลรูปภาพพนักงานในระบบ');
         }
-      } catch (err) { setStatus('❌ เกิดข้อผิดพลาด: ' + err.message); }
+      } catch (err) {
+        setStatus('❌ เกิดข้อผิดพลาด: ' + err.message);
+      }
     }
 
     async function loadModels() {
@@ -356,6 +366,7 @@
       ]);
     }
 
+    // ⚡ 3. ดึงรูปพนักงานและประมวลผลเร็วขึ้น
     async function loadEmployees() {
       try {
         const response = await fetch(WEB_APP_URL + '?action=getEmployees');
@@ -367,16 +378,25 @@
         await Promise.all(employeesData.map(async (emp) => {
           try {
             const img = await faceapi.fetchImage(emp.dataUrl);
-            const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 }))
-              .withFaceLandmarks().withFaceDescriptor();
-            if (detection) labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
-          } catch (e) { }
+            const detection = await faceapi.detectSingleFace(
+              img,
+              new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.35 })
+            ).withFaceLandmarks().withFaceDescriptor();
+
+            if (detection) {
+              labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(emp.id, [detection.descriptor]));
+            }
+          } catch (e) {
+            console.warn('ไม่สามารถประมวลผลรูปพนักงาน:', emp.id, e);
+          }
         }));
 
         if (labeledDescriptors.length > 0) {
-          matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
+          matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6); // 0.6 = ยืดหยุ่นขึ้น จำหน้าง่าย
         }
-      } catch (err) { setStatus('⚠️ เกิดข้อผิดพลาดโหลดข้อมูล: ' + err.message); }
+      } catch (err) {
+        setStatus('⚠️ เกิดข้อผิดพลาดโหลดข้อมูล: ' + err.message);
+      }
     }
 
     async function startCamera() {
@@ -390,9 +410,8 @@
       document.getElementById('overlay').style.transform = video.style.transform;
     }
 
-    // 💡 ข้อ 2 & ข้อ 1: คำนวณประเภทการลงเวลามนุษย์ให้อัตโนมัติ (เช็กเวลา 06:00 - 08:00)
     function autoSelectActionForEmployee(empId) {
-      if (manualOverrideAction) return manualOverrideAction; // ถ้าเลือกเองให้ใช้ค่าที่เลือก
+      if (manualOverrideAction) return manualOverrideAction;
 
       const status = todayStatusMap[empId] || {};
       const now = new Date();
@@ -401,7 +420,6 @@
       let action = 'เข้างาน';
 
       if (!status.lastNormal) {
-        // 06:00 (360 นาที) - 08:00 (480 นาที)
         if (currentMinutes >= 360 && currentMinutes <= 480) {
           action = 'เข้างาน';
         } else if (currentMinutes > 480) {
@@ -463,7 +481,7 @@
       if (popupTimer) clearTimeout(popupTimer);
       popupTimer = setTimeout(() => {
         popup.style.display = 'none';
-      }, 3000); // 💡 เด้งค้างไว้ 3 วินาที
+      }, 3000);
     }
 
     function addLogItem(name, type, time) {
@@ -485,6 +503,7 @@
       ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 6; ctx.stroke();
     }
 
+    // ⚡ 4. ปรับการสแกนใบหน้า ให้ตรวจจับเร็ว ไว และสแกนง่าย
     function detectLoop() {
       const video = document.getElementById('video');
       const overlay = document.getElementById('overlay');
@@ -494,8 +513,10 @@
         isProcessing = true;
 
         try {
-          const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
-            .withFaceLandmarks().withFaceDescriptor();
+          const detection = await faceapi.detectSingleFace(
+            video,
+            new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.35 })
+          ).withFaceLandmarks().withFaceDescriptor();
 
           const dims = faceapi.matchDimensions(overlay, video, true);
           const ctx = overlay.getContext('2d');
@@ -516,8 +537,9 @@
 
               const actionType = autoSelectActionForEmployee(empId);
 
-              if (yawRatio < 0.35 || yawRatio > 0.65) {
-                turnProgress = Math.min(1.0, turnProgress + 0.35);
+              // 🚀 ปรับมุมเอียงหน้าเล็กน้อยก็ผ่าน และบวกเกจครั้งละ 0.5 ให้ผ่านไวขึ้น
+              if (yawRatio < 0.42 || yawRatio > 0.58) {
+                turnProgress = Math.min(1.0, turnProgress + 0.5);
                 if (turnProgress >= 1.0) hasTurnedHead = true;
               } else {
                 turnProgress = Math.max(0.1, turnProgress - 0.05);
@@ -526,14 +548,14 @@
               const box = resized.detection.box;
               drawProgressCircle(ctx, box, turnProgress);
               new faceapi.draw.DrawBox(box, {
-                label: `${empName} (${((1 - match.distance) * 100).toFixed(0)}%) ${hasTurnedHead ? '🔓' : '🔒 หันหน้าเพื่อยืนยัน'}`,
+                label: `${empName} (${((1 - match.distance) * 100).toFixed(0)}%) ${hasTurnedHead ? '🔓' : '🔒 หันหน้าเล็กน้อย'}`,
                 boxColor: '#10b981'
               }).draw(overlay);
 
               const now = Date.now();
               if (!lastLoggedTime[empId] || now - lastLoggedTime[empId] > COOLDOWN_MS) {
                 if (!hasTurnedHead) {
-                  setStatus('🔒 ตรวจพบคุณ ' + empName + ' — กรุณาหันหน้าเล็กน้อย...');
+                  setStatus('🔒 ตรวจพบคุณ ' + empName + ' — กรุณาเอียงหน้าเล็กน้อย...');
                   return;
                 }
 
@@ -560,18 +582,14 @@
 
                 if (data.success) {
                   playBeep();
-
-                  // 💡 ข้อ 5: เสียงตอบรับ
                   speak(`บันทึกเวลา${actionType}สำเร็จแล้วค่ะ คุณ${empName}`);
-
-                  // 💡 ข้อ 3: ป๊อบอัพลอยด่วน 3 วินาที
                   showQuickPopup(empName, actionType);
 
                   if (!todayStatusMap[empId]) todayStatusMap[empId] = {};
                   if (actionType.includes('เข้างาน') || actionType === 'ออกงาน') todayStatusMap[empId].lastNormal = actionType;
                   if (actionType === 'เข้าทำ OT' || actionType === 'ออก OT') todayStatusMap[empId].lastOT = actionType;
 
-                  manualOverrideAction = null; // รีเซ็ตการ override เมื่อบันทึกสำเร็จ
+                  manualOverrideAction = null;
 
                   document.getElementById('result').className = actionType.includes('เข้า') ? 'result-in' : 'result-out';
                   document.getElementById('result').innerText = `${empName} — ${actionType} (${data.displayTime})`;
@@ -585,9 +603,10 @@
             } else { turnProgress = 0; hasTurnedHead = false; }
           }
         } catch (err) { } finally { isProcessing = false; }
-      }, 300);
+      }, 250); // สแกนถี่ทุกๆ 250ms
     }
 
+    // เริ่มต้นทำงาน
     init();
   </script>
 </body>
