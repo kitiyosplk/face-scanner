@@ -320,8 +320,12 @@
       });
       video.srcObject = stream;
 
-      video.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
-      overlay.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
+      // จัดการ Mirror ภาพตามประเภทกล้อง
+      // กล้องหน้า (user) = กลับด้าน (scaleX -1) เพื่อให้เหมือนกระจกเงา
+      // กล้องหลัง (environment) = ภาพปกติ (none) ไม่ต้องกลับด้าน
+      const mirrorTransform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
+      video.style.transform = mirrorTransform;
+      overlay.style.transform = mirrorTransform;
 
       return new Promise(resolve => {
         video.onloadedmetadata = () => {
@@ -400,6 +404,8 @@
 
                 if (!hasTurnedHead) {
                   setStatus('🔒 ตรวจพบคุณ ' + empName + ' — กรุณาหันหน้าไปทางซ้ายหรือขวาเล็กน้อยเพื่อยืนยันตัวตน...');
+
+                  // ตรวจจับอัตราส่วนการหันหน้า (รองรับทั้งกล้องหน้าและกล้องหลัง)
                   if (yawRatio < 0.33 || yawRatio > 0.67) {
                     hasTurnedHead = true;
                     setStatus('🔓 ยืนยันตัวตนสำเร็จ! กำลังบันทึกเวลา...');
@@ -418,6 +424,7 @@
                 canvas.height = video.videoHeight || 480;
                 const ctx = canvas.getContext('2d');
 
+                // ปรับแต่งภาพถ่ายตอนเซฟลง Drive ให้ตรงตามการสลับกล้อง
                 if (currentFacingMode === 'user') {
                   ctx.translate(canvas.width, 0);
                   ctx.scale(-1, 1);
